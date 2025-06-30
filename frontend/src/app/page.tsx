@@ -1,7 +1,10 @@
 "use client";
 import React, { useState, useRef } from "react";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/chat";
+const API_URL = process.env.NEXT_PUBLIC_API_URL;
+if (!API_URL) {
+  throw new Error("NEXT_PUBLIC_API_URL is not set");
+}
 
 const warmColors = {
   background: "#FFF8F0",
@@ -49,7 +52,7 @@ export default function ChatPage() {
     setMessages((msgs) => [...msgs, { role: "user", content: userMessage }]);
     setInput("");
     try {
-      const response = await fetch(API_URL, {
+      const response = await fetch(API_URL as string, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
