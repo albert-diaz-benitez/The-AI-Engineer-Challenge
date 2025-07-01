@@ -1,6 +1,13 @@
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f5faff;
+  --foreground: #1a237e;
+  --primary-blue: #2979ff;
+  --chat-bot-bg: #e3f0ff;
+  --chat-user-bg: #2979ff;
+  --input-bg: #f5faff;
+  --input-border: #90caf9;
+  --button-bg: #2979ff;
+  --button-text: #fff;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -39,4 +46,16 @@ a {
   html {
     color-scheme: dark;
   }
+}
+
+button {
+  background: var(--button-bg);
+  color: var(--button-text);
+  border: none;
+}
+
+input[type="text"], input[type="password"], select {
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  color: var(--foreground);
 }

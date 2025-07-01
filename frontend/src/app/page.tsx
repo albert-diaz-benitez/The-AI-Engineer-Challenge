@@ -8,16 +8,6 @@ if (!API_URL) {
   throw new Error("NEXT_PUBLIC_API_URL is not set");
 }
 
-const warmColors = {
-  background: "#FFF8F0",
-  userBubble: "#FFD6A5",
-  assistantBubble: "#FFB4A2",
-  border: "#E29578",
-  input: "#FFE5D9",
-  button: "#FFB4A2",
-  buttonText: "#6D6875",
-};
-
 function ChatMessage({ message, role, timestamp }: { message: string; role: string; timestamp: string }) {
   return (
     <div className={styles.messageRow} style={{ alignSelf: role === "user" ? "flex-end" : "flex-start" }}>
@@ -145,19 +135,19 @@ export default function ChatPage() {
         </div>
       )}
       <div className={styles.chatBox}>
-        <div style={{ background: "#fff", border: `2px solid ${warmColors.border}`, borderRadius: 16, padding: 24, width: "100%", maxWidth: 480, boxShadow: "0 2px 12px rgba(0,0,0,0.06)", display: "flex", flexDirection: "column", gap: 12 }}>
-          <label style={{ fontWeight: 500, color: warmColors.buttonText }}>
+        <div style={{ background: "var(--chat-user-bg)", border: "2px solid var(--primary-blue)", borderRadius: 16, padding: 24, width: "100%", maxWidth: 480, boxShadow: "0 2px 12px rgba(0,0,0,0.06)", display: "flex", flexDirection: "column", gap: 12 }}>
+          <label style={{ fontWeight: 500, color: "var(--button-text)" }}>
             OpenAI API Key:
             <input
               type="password"
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
-              style={{ width: "100%", marginTop: 4, marginBottom: 8, padding: 8, borderRadius: 8, border: `1px solid ${warmColors.border}`, background: warmColors.input }}
+              style={{ width: "100%", marginTop: 4, marginBottom: 8, padding: 8, borderRadius: 8, border: "1px solid var(--input-border)", background: "var(--input-bg)" }}
               placeholder="sk-..."
               autoComplete="off"
             />
           </label>
-          <label style={{ display: "flex", alignItems: "center", fontSize: 14, color: warmColors.buttonText, marginBottom: 8 }}>
+          <label style={{ display: "flex", alignItems: "center", fontSize: 14, color: "var(--button-text)", marginBottom: 8 }}>
             <input
               type="checkbox"
               checked={rememberApiKey}
@@ -166,9 +156,9 @@ export default function ChatPage() {
             />
             Remember API key (stored only in your browser)
           </label>
-          <label style={{ fontWeight: 500, color: warmColors.buttonText }}>
+          <label style={{ fontWeight: 500, color: "var(--button-text)" }}>
             Model:
-            <select value={model} onChange={(e) => setModel(e.target.value)} style={{ width: "100%", marginTop: 4, marginBottom: 8, padding: 8, borderRadius: 8, border: `1px solid ${warmColors.border}`, background: warmColors.input }}>
+            <select value={model} onChange={(e) => setModel(e.target.value)} style={{ width: "100%", marginTop: 4, marginBottom: 8, padding: 8, borderRadius: 8, border: "1px solid var(--input-border)", background: "var(--input-bg)" }}>
               <option value="gpt-4.1-mini">gpt-4.1-mini</option>
               <option value="gpt-3.5-turbo">gpt-3.5-turbo</option>
             </select>
@@ -210,7 +200,7 @@ export default function ChatPage() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter" && !loading) handleSend(); }}
-              style={{ flex: 1, padding: 10, borderRadius: 8, border: `1px solid ${warmColors.border}`, background: warmColors.input }}
+              style={{ flex: 1, padding: 10, borderRadius: 8, border: "1px solid var(--input-border)", background: "var(--input-bg)" }}
               placeholder="Type your message..."
               disabled={loading}
               autoFocus
@@ -218,7 +208,7 @@ export default function ChatPage() {
             <button
               onClick={handleSend}
               disabled={loading || !input.trim() || !apiKey.trim()}
-              style={{ background: warmColors.button, color: warmColors.buttonText, border: "none", borderRadius: 8, padding: "0 18px", fontWeight: 600, cursor: loading ? "not-allowed" : "pointer", transition: "background 0.2s" }}
+              style={{ background: "var(--button-bg)", color: "var(--button-text)", border: "none", borderRadius: 8, padding: "0 18px", fontWeight: 600, cursor: loading ? "not-allowed" : "pointer", transition: "background 0.2s" }}
             >
               {loading ? "..." : "Send"}
             </button>
