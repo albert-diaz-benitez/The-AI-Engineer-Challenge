@@ -1,5 +1,5 @@
 # Import required FastAPI components for building the API
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 # Import Pydantic for data validation and settings management
@@ -8,6 +8,10 @@ from pydantic import BaseModel
 from openai import OpenAI
 import os
 from typing import Optional
+import tempfile
+from aimakerspace.text_utils import PDFLoader, CharacterTextSplitter
+from aimakerspace.vectordatabase import VectorDatabase
+import shutil
 
 # Initialize FastAPI application with a title
 app = FastAPI(title="OpenAI Chat API")
@@ -65,6 +69,46 @@ async def chat(request: ChatRequest):
 @app.get("/api/health")
 async def health_check():
     return {"status": "ok"}
+
+@app.post("/api/upload_pdf")
+async def upload_pdf(file: UploadFile = File(...)):
+    """
+    Endpoint to upload a PDF, chunk its text, and upload the chunks to the vector database.
+    """
+    if not file.filename.lower().endswith('.pdf'):
+        raise HTTPException(status_code=400, detail="Only PDF files are supported.")
+
+    # Save uploaded file to a temporary location
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+        shutil.copyfileobj(file.file, tmp)
+        tmp_path = tmp.name
+
+    try:
+        # Load and extract text from PDF
+        loader = PDFLoader(tmp_path)
+        documents = loader.load_documents()  # List of extracted text (usually one item)
+        if not documents or not documents[0].strip():
+            raise HTTPException(status_code=400, detail="No extractable text found in PDF.")
+
+        # Chunk the text
+        splitter = CharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+        chunks = splitter.split_texts(documents)
+        if not chunks:
+            raise HTTPException(status_code=400, detail="Failed to chunk PDF text.")
+
+        # Upload chunks to vector database
+        vector_db = VectorDatabase()
+        await vector_db.abuild_from_list(chunks)
+
+        return {"status": "success", "chunks_uploaded": len(chunks)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error processing PDF: {str(e)}")
+    finally:
+        # Clean up temp file
+        try:
+            os.remove(tmp_path)
+        except Exception:
+            pass
 
 # Entry point for running the application directly
 if __name__ == "__main__":
