@@ -37,16 +37,22 @@ function PdfUploadBox() {
   const [uploading, setUploading] = useState(false);
   const [success, setSuccess] = useState("");
   const [error, setError] = useState("");
+  const [uploadType, setUploadType] = useState<'pdf' | 'gpx'>('pdf');
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFile(e.target.files?.[0] || null);
     setSuccess("");
     setError("");
+    if (e.target.files?.[0]?.name.toLowerCase().endsWith('.gpx')) {
+      setUploadType('gpx');
+    } else {
+      setUploadType('pdf');
+    }
   };
 
   const handleUpload = async () => {
     if (!file) {
-      setError("Please select a PDF file to upload.");
+      setError("Please select a PDF or GPX file to upload.");
       return;
     }
     setUploading(true);
@@ -55,7 +61,10 @@ function PdfUploadBox() {
     try {
       const formData = new FormData();
       formData.append("file", file);
-      const response = await fetch("/api/upload_pdf", {
+      const endpoint = file.name.toLowerCase().endsWith('.gpx')
+        ? "/api/upload_gpx"
+        : "/api/upload_pdf";
+      const response = await fetch(endpoint, {
         method: "POST",
         body: formData,
       });
@@ -79,22 +88,33 @@ function PdfUploadBox() {
 
   return (
     <div className={styles.uploadBox}>
-      <div className={styles.uploadTitle}>Upload a PDF to the Vector Database</div>
-      <input type="file" accept="application/pdf" onChange={handleFileChange} disabled={uploading} />
+      <div className={styles.uploadTitle}>Upload a PDF or GPX Route</div>
+      <input
+        type="file"
+        accept="application/pdf,.pdf,.gpx,application/gpx+xml"
+        onChange={handleFileChange}
+        disabled={uploading}
+      />
       <button
         className={styles.uploadButton}
         onClick={handleUpload}
         disabled={uploading || !file}
       >
-        {uploading ? "Uploading..." : "Upload PDF"}
+        {uploading ? "Uploading..." : `Upload ${uploadType === 'gpx' ? 'GPX' : 'PDF'}`}
       </button>
       {success && <div className={styles.successMsg}>{success}</div>}
       {error && <div className={styles.errorMsg}>{error}</div>}
       <div className={styles.uploadHint}>
-        Your PDF will be chunked and stored for semantic search!
+        Your file will be chunked and stored for semantic search!
       </div>
     </div>
   );
+}
+
+function fileIcon(fileName: string) {
+  if (fileName.toLowerCase().endsWith('.gpx')) return '🗺️';
+  if (fileName.toLowerCase().endsWith('.pdf')) return '📄';
+  return '📁';
 }
 
 function ChatBox({ apiKey }: { apiKey: string }) {
@@ -190,7 +210,9 @@ function ChatBox({ apiKey }: { apiKey: string }) {
           >
             <option value="" disabled>Select a file...</option>
             {files.map(f => (
-              <option key={f} value={f}>{f}</option>
+              <option key={f} value={f}>
+                {fileIcon(f)} {f}
+              </option>
             ))}
           </select>
         </label>
