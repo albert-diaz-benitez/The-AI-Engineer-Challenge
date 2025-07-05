@@ -66,8 +66,12 @@ function PdfUploadBox() {
       const data = await response.json();
       setSuccess(`Upload successful! Chunks uploaded: ${data.chunks_uploaded}`);
       setFile(null);
-    } catch (e: any) {
-      setError(e.message || "Upload failed");
+    } catch (e) {
+      if (e instanceof Error) {
+        setError(e.message || "Upload failed");
+      } else {
+        setError("Upload failed");
+      }
     } finally {
       setUploading(false);
     }
@@ -155,8 +159,12 @@ function ChatBox({ apiKey }: { apiKey: string }) {
           }
         });
       }
-    } catch (e: any) {
-      setError(e.message || "Unknown error");
+    } catch (e) {
+      if (e instanceof Error) {
+        setError(e.message || "Unknown error");
+      } else {
+        setError("Unknown error");
+      }
     } finally {
       setLoading(false);
       setTimeout(() => {
