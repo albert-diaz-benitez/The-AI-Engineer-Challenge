@@ -4,6 +4,8 @@ import shutil
 import tempfile
 from typing import Optional
 
+# Import gpxpy for GPX file processing
+import gpxpy
 from aimakerspace.text_utils import CharacterTextSplitter, PDFLoader
 from aimakerspace.vectordatabase import VectorDatabase
 from fastapi import Body, FastAPI, File, HTTPException, UploadFile
@@ -61,10 +63,11 @@ async def chat(request: ChatRequest):
             return_as_text=True,
             file_name=request.file_name,
         )
-        context = "\n".join(relevant_chunks)
+        context = "\n".join(relevant_chunks)  # type: ignore[arg-type]
         # Compose the context-augmented system/developer message
         rag_message = (
-            "You are a helpful assistant. Use the following context from the user's document "
+            "You are a helpful assistant."
+            " Use the following context from the user's document "
             "to answer the question.\nContext:\n" + context
         )
 
@@ -146,6 +149,66 @@ async def upload_pdf(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=f"Error processing PDF: {str(e)}")
     finally:
         # Clean up temp file
+        try:
+            os.remove(tmp_path)
+        except Exception:
+            pass
+
+
+@app.post("/api/upload_gpx")
+async def upload_gpx(file: UploadFile = File(...)):
+    if not file.filename.lower().endswith(".gpx"):
+        raise HTTPException(status_code=400, detail="Only GPX files are supported.")
+
+    # Save uploaded file to a temporary location
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".gpx") as tmp:
+        shutil.copyfileobj(file.file, tmp)
+        tmp_path = tmp.name
+
+    try:
+        # Parse GPX file
+        with open(tmp_path) as gpx_file:
+            gpx = gpxpy.parse(gpx_file)
+
+        # Extract summary and details
+        summary = f"GPX file: {file.filename}\n"
+        if gpx.tracks:
+            for i, track in enumerate(gpx.tracks):
+                summary += f"Track {i+1}: {track.name or 'Unnamed'}\n"
+                for j, segment in enumerate(track.segments):
+                    points = segment.points
+                    summary += f"  Segment {j+1}: {len(points)} points\n"
+                    if points:
+                        start = points[0]
+                        end = points[-1]
+                        summary += (
+                            f"    Start: ({start.latitude}, {start.longitude})\n"
+                            f"    End: ({end.latitude}, {end.longitude})\n"
+                        )
+                        total_distance = segment.length_3d() / 1000  # km
+                        summary += f"    Distance: {total_distance:.2f} km\n"
+                        elev_gain = sum(
+                            max(0, b.elevation - a.elevation)
+                            for a, b in zip(points, points[1:])
+                            if a.elevation is not None and b.elevation is not None
+                        )
+                        summary += f"    Elevation gain: {elev_gain:.1f} m\n"
+        else:
+            summary += "No tracks found.\n"
+
+        # Chunk the summary (could be improved for large files)
+        splitter = CharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+        chunks = splitter.split_texts([summary])
+        if not chunks:
+            raise HTTPException(status_code=400, detail="Failed to chunk GPX data.")
+
+        # Upload chunks to vector database, include file name and type
+        vector_db = VectorDatabase()
+        await vector_db.abuild_from_list(chunks, file_name=file.filename)
+        return {"status": "success", "chunks_uploaded": len(chunks)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error processing GPX: {str(e)}")
+    finally:
         try:
             os.remove(tmp_path)
         except Exception:
