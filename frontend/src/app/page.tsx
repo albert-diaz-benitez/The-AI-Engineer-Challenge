@@ -1,95 +1,145 @@
 "use client";
 import React, { useState, useRef, useEffect } from "react";
 import styles from "./page.module.css";
-import Image from "next/image";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL;
-if (!API_URL) {
-  throw new Error("NEXT_PUBLIC_API_URL is not set");
-}
-
-function ChatMessage({ message, role, timestamp }: { message: string; role: string; timestamp: string }) {
+function SettingsModal({ open, onClose, apiKey, setApiKey }: { open: boolean; onClose: () => void; apiKey: string; setApiKey: (k: string) => void }) {
+  const [input, setInput] = useState(apiKey);
+  useEffect(() => { setInput(apiKey); }, [apiKey, open]);
+  if (!open) return null;
   return (
-    <div className={styles.messageRow} style={{ alignSelf: role === "user" ? "flex-end" : "flex-start" }}>
-      <div className={styles.avatar}>{role === "user" ? "👤" : "🤖"}</div>
-      <div className={styles.messageBubble}>
-        <div>{message}</div>
-        <div className={styles.timestamp}>{timestamp}</div>
+    <div style={{ position: "fixed", top: 0, left: 0, width: "100vw", height: "100vh", background: "rgba(0,0,0,0.18)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ background: "#fff", borderRadius: 16, padding: 32, minWidth: 320, boxShadow: "0 4px 32px rgba(100,181,246,0.18)", position: "relative", display: "flex", flexDirection: "column", gap: 18 }}>
+        <button onClick={onClose} style={{ position: "absolute", top: 12, right: 16, background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#1976d2" }} aria-label="Close">×</button>
+        <div style={{ fontWeight: 700, color: "#1976d2", fontSize: 20, marginBottom: 8 }}>API Key Settings</div>
+        <label style={{ fontWeight: 500, color: "#1976d2" }}>
+          OpenAI API Key:
+          <input
+            type="password"
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            placeholder="sk-..."
+            style={{ width: "100%", marginTop: 8, padding: 10, borderRadius: 8, border: "1px solid #90caf9", background: "#f5faff", fontSize: 16 }}
+            autoFocus
+          />
+        </label>
+        <div style={{ display: "flex", gap: 12, marginTop: 8 }}>
+          <button onClick={() => { setApiKey(input); onClose(); }} className={styles.uploadButton} style={{ minWidth: 80 }}>Save</button>
+          <button onClick={() => { setApiKey(""); setInput(""); localStorage.removeItem("openaiApiKey"); onClose(); }} className={styles.uploadButton} style={{ background: "#d32f2f", minWidth: 80 }}>Clear</button>
+        </div>
+        <div style={{ fontSize: 13, color: "#1976d2", marginTop: 4 }}>Your key is only stored in your browser.</div>
       </div>
     </div>
   );
 }
 
-function InfoTooltip({ text }: { text: string }) {
+function PdfUploadBox() {
+  const [file, setFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [success, setSuccess] = useState("");
+  const [error, setError] = useState("");
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setFile(e.target.files?.[0] || null);
+    setSuccess("");
+    setError("");
+  };
+
+  const handleUpload = async () => {
+    if (!file) {
+      setError("Please select a PDF file to upload.");
+      return;
+    }
+    setUploading(true);
+    setSuccess("");
+    setError("");
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const response = await fetch("/api/upload_pdf", {
+        method: "POST",
+        body: formData,
+      });
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.detail || "Upload failed");
+      }
+      const data = await response.json();
+      setSuccess(`Upload successful! Chunks uploaded: ${data.chunks_uploaded}`);
+      setFile(null);
+    } catch (e: any) {
+      setError(e.message || "Upload failed");
+    } finally {
+      setUploading(false);
+    }
+  };
+
   return (
-    <span style={{ marginLeft: 6, cursor: "pointer" }} title={text} aria-label="info">ℹ️</span>
+    <div className={styles.uploadBox}>
+      <div className={styles.uploadTitle}>Upload a PDF to the Vector Database</div>
+      <input type="file" accept="application/pdf" onChange={handleFileChange} disabled={uploading} />
+      <button
+        className={styles.uploadButton}
+        onClick={handleUpload}
+        disabled={uploading || !file}
+      >
+        {uploading ? "Uploading..." : "Upload PDF"}
+      </button>
+      {success && <div className={styles.successMsg}>{success}</div>}
+      {error && <div className={styles.errorMsg}>{error}</div>}
+      <div className={styles.uploadHint}>
+        Your PDF will be chunked and stored for semantic search!
+      </div>
+    </div>
   );
 }
 
-export default function ChatPage() {
-  const [apiKey, setApiKey] = useState("");
-  const [model, setModel] = useState("gpt-4.1-mini");
+function ChatBox({ apiKey }: { apiKey: string }) {
   const [input, setInput] = useState("");
-  const [messages, setMessages] = useState<{ role: string; content: string; timestamp: string }[]>([]);
+  const [messages, setMessages] = useState<{ role: "user" | "assistant"; content: string }[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const chatContainerRef = useRef<HTMLDivElement>(null);
-  const [showOnboarding, setShowOnboarding] = useState(false);
-  const [rememberApiKey, setRememberApiKey] = useState(false);
+  const [files, setFiles] = useState<string[]>([]);
+  const [selectedFile, setSelectedFile] = useState<string>("");
+  const chatHistoryRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!localStorage.getItem("onboardingDismissed")) {
-      setShowOnboarding(true);
-    }
-    const storedKey = localStorage.getItem("openaiApiKey");
-    if (storedKey) {
-      setApiKey(storedKey);
-      setRememberApiKey(true);
-    }
+    // Fetch file list from backend
+    fetch("/api/files")
+      .then(res => res.json())
+      .then(data => setFiles(data.files || []));
   }, []);
-
-  useEffect(() => {
-    if (rememberApiKey && apiKey) {
-      localStorage.setItem("openaiApiKey", apiKey);
-    } else {
-      localStorage.removeItem("openaiApiKey");
-    }
-  }, [rememberApiKey, apiKey]);
-
-  const handleDismissOnboarding = () => {
-    setShowOnboarding(false);
-    localStorage.setItem("onboardingDismissed", "true");
-  };
 
   const handleSend = async () => {
     if (!input.trim()) return;
-    if (!apiKey.trim()) {
-      setError("Please enter your OpenAI API key before sending a message.");
+    if (!apiKey) {
+      setError("Please set your OpenAI API key in settings before chatting.");
+      return;
+    }
+    if (!selectedFile) {
+      setError("Please select a file to use for context.");
       return;
     }
     setError("");
     setLoading(true);
+    setMessages((msgs) => [...msgs, { role: "user", content: input }]);
     const userMessage = input;
-    const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    setMessages((msgs) => [...msgs, { role: "user", content: userMessage, timestamp: now }]);
     setInput("");
     try {
-      const response = await fetch(API_URL as string, {
+      const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           developer_message: "You are a helpful assistant.",
           user_message: userMessage,
-          model,
+          model: "gpt-4.1-mini",
           api_key: apiKey,
+          file_name: selectedFile,
         }),
       });
       if (!response.body) throw new Error("No response body");
       let assistantMessage = "";
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
-      const aiTimestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      let aiMessageAdded = false;
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
@@ -98,134 +148,105 @@ export default function ChatPage() {
           if (msgs[msgs.length - 1]?.role === "assistant") {
             return [
               ...msgs.slice(0, msgs.length - 1),
-              { role: "assistant", content: assistantMessage, timestamp: aiTimestamp },
+              { role: "assistant", content: assistantMessage },
             ];
           } else {
-            aiMessageAdded = true;
-            return [...msgs, { role: "assistant", content: assistantMessage, timestamp: aiTimestamp }];
+            return [...msgs, { role: "assistant", content: assistantMessage }];
           }
         });
       }
-      if (!aiMessageAdded) {
-        setMessages((msgs) => [...msgs, { role: "assistant", content: assistantMessage, timestamp: aiTimestamp }]);
-      }
-    } catch (e: unknown) {
-      if (e instanceof Error) {
-        setError(e.message);
-      } else {
-        setError("Unknown error");
-      }
+    } catch (e: any) {
+      setError(e.message || "Unknown error");
     } finally {
       setLoading(false);
       setTimeout(() => {
-        chatContainerRef.current?.scrollTo({ top: chatContainerRef.current.scrollHeight, behavior: "smooth" });
+        chatHistoryRef.current?.scrollTo({ top: chatHistoryRef.current.scrollHeight, behavior: "smooth" });
       }, 100);
     }
   };
 
   return (
-    <div className={styles.pageContainer}>
-      <div className={styles.headerBranding}>
-        <Image src="/logo-ai-vibes.png" alt="AI Vibes Logo" width={40} height={40} className={styles.logo} />
-        <span className={styles.brandName}>AI Vibes Chat</span>
+    <div className={styles.chatBox}>
+      <div style={{ display: "flex", width: "100%", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+        <div className={styles.chatTitle}>Chat with your Documents</div>
+        <button onClick={() => window.dispatchEvent(new CustomEvent("openSettingsModal"))} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#1976d2" }} aria-label="Settings">⚙️</button>
       </div>
-      {showOnboarding && (
-        <div className={styles.onboardingTip}>
-          <span>👋 Welcome! Enter your OpenAI API key to get started. <button onClick={handleDismissOnboarding} className={styles.dismissBtn}>Dismiss</button></span>
-        </div>
-      )}
-      <div className={styles.chatBox}>
-        <div style={{ background: "var(--chat-user-bg)", border: "2px solid var(--primary-blue)", borderRadius: 16, padding: 24, width: "100%", maxWidth: 480, boxShadow: "0 2px 12px rgba(0,0,0,0.06)", display: "flex", flexDirection: "column", gap: 12 }}>
-          <label style={{ fontWeight: 500, color: "var(--button-text)" }}>
-            OpenAI API Key:
-            <input
-              type="password"
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              style={{ width: "100%", marginTop: 4, marginBottom: 8, padding: 8, borderRadius: 8, border: "1px solid var(--input-border)", background: "var(--input-bg)" }}
-              placeholder="sk-..."
-              autoComplete="off"
-            />
-          </label>
-          <label style={{ display: "flex", alignItems: "center", fontSize: 14, color: "var(--button-text)", marginBottom: 8 }}>
-            <input
-              type="checkbox"
-              checked={rememberApiKey}
-              onChange={() => setRememberApiKey((v) => !v)}
-              style={{ marginRight: 6 }}
-            />
-            Remember API key (stored only in your browser)
-          </label>
-          <label style={{ fontWeight: 500, color: "var(--button-text)" }}>
-            Model:
-            <select value={model} onChange={(e) => setModel(e.target.value)} style={{ width: "100%", marginTop: 4, marginBottom: 8, padding: 8, borderRadius: 8, border: "1px solid var(--input-border)", background: "var(--input-bg)" }}>
-              <option value="gpt-4.1-mini">gpt-4.1-mini</option>
-              <option value="gpt-3.5-turbo">gpt-3.5-turbo</option>
-            </select>
-            <InfoTooltip text="Choose the AI model. gpt-4.1-mini is more advanced, gpt-3.5-turbo is faster and cheaper." />
-          </label>
-          <div ref={chatContainerRef} className={styles.chatContainer}>
-            {messages.length === 0 && (
-              <div className={styles.emptyState}>
-                <div className={styles.emptyIcon}>💬</div>
-                <div>Start the conversation!</div>
-              </div>
-            )}
-            {messages.map((msg, idx) => (
-              <div key={idx} className={styles.fadeIn}>
-                <ChatMessage message={msg.content} role={msg.role} timestamp={msg.timestamp} />
-              </div>
+      <div style={{ width: "100%", marginBottom: 12 }}>
+        <label style={{ fontWeight: 600, color: "#1976d2", fontSize: "1.1rem" }}>
+          Select file for context:
+          <select
+            value={selectedFile}
+            onChange={e => setSelectedFile(e.target.value)}
+            style={{ marginLeft: 12, padding: "8px 16px", borderRadius: 8, border: "1.5px solid #90caf9", fontSize: "1.1rem", background: "#fff" }}
+            required
+          >
+            <option value="" disabled>Select a file...</option>
+            {files.map(f => (
+              <option key={f} value={f}>{f}</option>
             ))}
-            {loading && (
-              <div className={styles.messageRow} style={{ alignSelf: "flex-start" }}>
-                <div className={styles.avatar}>🤖</div>
-                <div className={styles.messageBubble}>
-                  <span className={styles.loadingDots}>
-                    <span>.</span><span>.</span><span>.</span>
-                  </span>
-                  <div className={styles.timestamp}>{new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
-                </div>
-              </div>
-            )}
-          </div>
-          {error && <div className={styles.errorMsg}>{
-            error.includes("key") ? "Please check your API key and try again." :
-            error.includes("No response body") ? "No response from the server. Please try again later." :
-            error.includes("fetch") ? "Network error. Please check your connection." :
-            error
-          }</div>}
-          <div style={{ display: "flex", gap: 8 }}>
-            <input
-              type="text"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter" && !loading) handleSend(); }}
-              style={{ flex: 1, padding: 10, borderRadius: 8, border: "1px solid var(--input-border)", background: "var(--input-bg)" }}
-              placeholder="Type your message..."
-              disabled={loading}
-              autoFocus
-            />
-            <button
-              onClick={handleSend}
-              disabled={loading || !input.trim() || !apiKey.trim()}
-              style={{ background: "var(--button-bg)", color: "var(--button-text)", border: "none", borderRadius: 8, padding: "0 18px", fontWeight: 600, cursor: loading ? "not-allowed" : "pointer", transition: "background 0.2s" }}
-            >
-              {loading ? "..." : "Send"}
-            </button>
-          </div>
-        </div>
+          </select>
+        </label>
       </div>
-      <footer className={styles.footer}>
-        <span>
-          Made by <a href="https://github.com/albert-diaz-benitez" target="_blank" rel="noopener noreferrer">@albertdiaz</a> | Powered by Next.js & FastAPI
-        </span>
-        <span>
-          <a href="https://github.com/albert-diaz-benitez/The-AI-Engineer-Challenge" target="_blank" rel="noopener noreferrer" className={styles.footerLink}>
-            <Image src="/github-mark.svg" alt="GitHub" width={20} height={20} style={{ verticalAlign: "middle" }} />
-          </a>
-        </span>
-      </footer>
-      <div className={styles.backgroundShape}></div>
+      <div className={styles.chatHistory} ref={chatHistoryRef}>
+        {messages.length === 0 && <div style={{ color: '#1976d2', opacity: 0.7 }}>Start the conversation!</div>}
+        {messages.map((msg, idx) => (
+          <div key={idx} className={styles.messageRow}>
+            <div className={msg.role === "user" ? styles.userMsg : styles.assistantMsg}>{msg.content}</div>
+          </div>
+        ))}
+        {loading && (
+          <div className={styles.messageRow}>
+            <div className={styles.assistantMsg}>...</div>
+          </div>
+        )}
+      </div>
+      {error && <div className={styles.errorMsg}>{error}</div>}
+      <div className={styles.inputRow}>
+        <input
+          className={styles.inputField}
+          type="text"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter" && !loading) handleSend(); }}
+          placeholder="Type your message..."
+          disabled={loading}
+        />
+        <button
+          className={styles.sendButton}
+          onClick={handleSend}
+          disabled={loading || !input.trim() || !selectedFile}
+        >
+          {loading ? "..." : "Send"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export default function Home() {
+  const [apiKey, setApiKey] = useState("");
+  const [modalOpen, setModalOpen] = useState(false);
+
+  useEffect(() => {
+    const storedKey = localStorage.getItem("openaiApiKey");
+    if (storedKey) setApiKey(storedKey);
+    const openModal = () => setModalOpen(true);
+    window.addEventListener("openSettingsModal", openModal);
+    return () => window.removeEventListener("openSettingsModal", openModal);
+  }, []);
+
+  useEffect(() => {
+    if (apiKey) localStorage.setItem("openaiApiKey", apiKey);
+    else localStorage.removeItem("openaiApiKey");
+  }, [apiKey]);
+
+  return (
+    <div className={styles.root}>
+      <SettingsModal open={modalOpen} onClose={() => setModalOpen(false)} apiKey={apiKey} setApiKey={setApiKey} />
+      <div className={styles.container}>
+        <PdfUploadBox />
+        <ChatBox apiKey={apiKey} />
+      </div>
     </div>
   );
 }
