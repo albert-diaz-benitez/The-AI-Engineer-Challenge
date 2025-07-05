@@ -1,65 +1,143 @@
 "use client";
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
+import styles from "./page.module.css";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL;
-if (!API_URL) {
-  throw new Error("NEXT_PUBLIC_API_URL is not set");
-}
-
-const warmColors = {
-  background: "#FFF8F0",
-  userBubble: "#FFD6A5",
-  assistantBubble: "#FFB4A2",
-  border: "#E29578",
-  input: "#FFE5D9",
-  button: "#FFB4A2",
-  buttonText: "#6D6875",
-};
-
-function ChatMessage({ message, role }: { message: string; role: string }) {
+function SettingsModal({ open, onClose, apiKey, setApiKey }: { open: boolean; onClose: () => void; apiKey: string; setApiKey: (k: string) => void }) {
+  const [input, setInput] = useState(apiKey);
+  useEffect(() => { setInput(apiKey); }, [apiKey, open]);
+  if (!open) return null;
   return (
-    <div
-      style={{
-        alignSelf: role === "user" ? "flex-end" : "flex-start",
-        background: role === "user" ? warmColors.userBubble : warmColors.assistantBubble,
-        color: "#222",
-        borderRadius: 16,
-        padding: "8px 16px",
-        margin: "4px 0",
-        maxWidth: "70%",
-        boxShadow: "0 1px 4px rgba(0,0,0,0.04)",
-      }}
-    >
-      {message}
+    <div style={{ position: "fixed", top: 0, left: 0, width: "100vw", height: "100vh", background: "rgba(0,0,0,0.18)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ background: "#fff", borderRadius: 16, padding: 32, minWidth: 320, boxShadow: "0 4px 32px rgba(100,181,246,0.18)", position: "relative", display: "flex", flexDirection: "column", gap: 18 }}>
+        <button onClick={onClose} style={{ position: "absolute", top: 12, right: 16, background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#1976d2" }} aria-label="Close">×</button>
+        <div style={{ fontWeight: 700, color: "#1976d2", fontSize: 20, marginBottom: 8 }}>API Key Settings</div>
+        <label style={{ fontWeight: 500, color: "#1976d2" }}>
+          OpenAI API Key:
+          <input
+            type="password"
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            placeholder="sk-..."
+            style={{ width: "100%", marginTop: 8, padding: 10, borderRadius: 8, border: "1px solid #90caf9", background: "#f5faff", fontSize: 16 }}
+            autoFocus
+          />
+        </label>
+        <div style={{ display: "flex", gap: 12, marginTop: 8 }}>
+          <button onClick={() => { setApiKey(input); onClose(); }} className={styles.uploadButton} style={{ minWidth: 80 }}>Save</button>
+          <button onClick={() => { setApiKey(""); setInput(""); localStorage.removeItem("openaiApiKey"); onClose(); }} className={styles.uploadButton} style={{ background: "#d32f2f", minWidth: 80 }}>Clear</button>
+        </div>
+        <div style={{ fontSize: 13, color: "#1976d2", marginTop: 4 }}>Your key is only stored in your browser.</div>
+      </div>
     </div>
   );
 }
 
-export default function ChatPage() {
-  const [apiKey, setApiKey] = useState("");
-  const [model, setModel] = useState("gpt-4.1-mini");
+function PdfUploadBox() {
+  const [file, setFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [success, setSuccess] = useState("");
+  const [error, setError] = useState("");
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setFile(e.target.files?.[0] || null);
+    setSuccess("");
+    setError("");
+  };
+
+  const handleUpload = async () => {
+    if (!file) {
+      setError("Please select a PDF file to upload.");
+      return;
+    }
+    setUploading(true);
+    setSuccess("");
+    setError("");
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const response = await fetch("/api/upload_pdf", {
+        method: "POST",
+        body: formData,
+      });
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.detail || "Upload failed");
+      }
+      const data = await response.json();
+      setSuccess(`Upload successful! Chunks uploaded: ${data.chunks_uploaded}`);
+      setFile(null);
+    } catch (e) {
+      if (e instanceof Error) {
+        setError(e.message || "Upload failed");
+      } else {
+        setError("Upload failed");
+      }
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <div className={styles.uploadBox}>
+      <div className={styles.uploadTitle}>Upload a PDF to the Vector Database</div>
+      <input type="file" accept="application/pdf" onChange={handleFileChange} disabled={uploading} />
+      <button
+        className={styles.uploadButton}
+        onClick={handleUpload}
+        disabled={uploading || !file}
+      >
+        {uploading ? "Uploading..." : "Upload PDF"}
+      </button>
+      {success && <div className={styles.successMsg}>{success}</div>}
+      {error && <div className={styles.errorMsg}>{error}</div>}
+      <div className={styles.uploadHint}>
+        Your PDF will be chunked and stored for semantic search!
+      </div>
+    </div>
+  );
+}
+
+function ChatBox({ apiKey }: { apiKey: string }) {
   const [input, setInput] = useState("");
-  const [messages, setMessages] = useState<{ role: string; content: string }[]>([]);
+  const [messages, setMessages] = useState<{ role: "user" | "assistant"; content: string }[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const chatContainerRef = useRef<HTMLDivElement>(null);
+  const [files, setFiles] = useState<string[]>([]);
+  const [selectedFile, setSelectedFile] = useState<string>("");
+  const chatHistoryRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    // Fetch file list from backend
+    fetch("/api/files")
+      .then(res => res.json())
+      .then(data => setFiles(data.files || []));
+  }, []);
 
   const handleSend = async () => {
-    if (!input.trim() || !apiKey.trim()) return;
+    if (!input.trim()) return;
+    if (!apiKey) {
+      setError("Please set your OpenAI API key in settings before chatting.");
+      return;
+    }
+    if (!selectedFile) {
+      setError("Please select a file to use for context.");
+      return;
+    }
     setError("");
     setLoading(true);
+    setMessages((msgs) => [...msgs, { role: "user", content: input }]);
     const userMessage = input;
-    setMessages((msgs) => [...msgs, { role: "user", content: userMessage }]);
     setInput("");
     try {
-      const response = await fetch(API_URL as string, {
+      const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           developer_message: "You are a helpful assistant.",
           user_message: userMessage,
-          model,
+          model: "gpt-4.1-mini",
           api_key: apiKey,
+          file_name: selectedFile,
         }),
       });
       if (!response.body) throw new Error("No response body");
@@ -71,7 +149,6 @@ export default function ChatPage() {
         if (done) break;
         assistantMessage += decoder.decode(value);
         setMessages((msgs) => {
-          // If last message is assistant, update it; else, add new
           if (msgs[msgs.length - 1]?.role === "assistant") {
             return [
               ...msgs.slice(0, msgs.length - 1),
@@ -82,71 +159,102 @@ export default function ChatPage() {
           }
         });
       }
-    } catch (e: unknown) {
+    } catch (e) {
       if (e instanceof Error) {
-        setError(e.message);
+        setError(e.message || "Unknown error");
       } else {
         setError("Unknown error");
       }
     } finally {
       setLoading(false);
       setTimeout(() => {
-        chatContainerRef.current?.scrollTo({ top: chatContainerRef.current.scrollHeight, behavior: "smooth" });
+        chatHistoryRef.current?.scrollTo({ top: chatHistoryRef.current.scrollHeight, behavior: "smooth" });
       }, 100);
     }
   };
 
   return (
-    <div style={{ minHeight: "100vh", background: warmColors.background, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-start", padding: 0 }}>
-      <h1 style={{ color: warmColors.buttonText, margin: "32px 0 8px 0" }}>AI Chat</h1>
-      <div style={{ background: "#fff", border: `2px solid ${warmColors.border}`, borderRadius: 16, padding: 24, width: "100%", maxWidth: 480, boxShadow: "0 2px 12px rgba(0,0,0,0.06)", display: "flex", flexDirection: "column", gap: 12 }}>
-        <label style={{ fontWeight: 500, color: warmColors.buttonText }}>
-          OpenAI API Key:
-          <input
-            type="password"
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-            style={{ width: "100%", marginTop: 4, marginBottom: 8, padding: 8, borderRadius: 8, border: `1px solid ${warmColors.border}`, background: warmColors.input }}
-            placeholder="sk-..."
-            autoComplete="off"
-          />
-        </label>
-        <label style={{ fontWeight: 500, color: warmColors.buttonText }}>
-          Model:
-          <select value={model} onChange={(e) => setModel(e.target.value)} style={{ width: "100%", marginTop: 4, marginBottom: 8, padding: 8, borderRadius: 8, border: `1px solid ${warmColors.border}`, background: warmColors.input }}>
-            <option value="gpt-4.1-mini">gpt-4.1-mini</option>
-            <option value="gpt-3.5-turbo">gpt-3.5-turbo</option>
+    <div className={styles.chatBox}>
+      <div style={{ display: "flex", width: "100%", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+        <div className={styles.chatTitle}>Chat with your Documents</div>
+        <button onClick={() => window.dispatchEvent(new CustomEvent("openSettingsModal"))} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#1976d2" }} aria-label="Settings">⚙️</button>
+      </div>
+      <div style={{ width: "100%", marginBottom: 12 }}>
+        <label style={{ fontWeight: 600, color: "#1976d2", fontSize: "1.1rem" }}>
+          Select file for context:
+          <select
+            value={selectedFile}
+            onChange={e => setSelectedFile(e.target.value)}
+            style={{ marginLeft: 12, padding: "8px 16px", borderRadius: 8, border: "1.5px solid #90caf9", fontSize: "1.1rem", background: "#fff" }}
+            required
+          >
+            <option value="" disabled>Select a file...</option>
+            {files.map(f => (
+              <option key={f} value={f}>{f}</option>
+            ))}
           </select>
         </label>
-        <div ref={chatContainerRef} style={{ background: warmColors.input, borderRadius: 12, minHeight: 200, maxHeight: 320, overflowY: "auto", padding: 12, marginBottom: 8, display: "flex", flexDirection: "column" }}>
-          {messages.map((msg, idx) => (
-            <ChatMessage key={idx} message={msg.content} role={msg.role} />
-          ))}
-        </div>
-        {error && <div style={{ color: "#b00020", marginBottom: 8 }}>{error}</div>}
-        <div style={{ display: "flex", gap: 8 }}>
-          <input
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter" && !loading) handleSend(); }}
-            style={{ flex: 1, padding: 10, borderRadius: 8, border: `1px solid ${warmColors.border}`, background: warmColors.input }}
-            placeholder="Type your message..."
-            disabled={loading}
-            autoFocus
-          />
-          <button
-            onClick={handleSend}
-            disabled={loading || !input.trim() || !apiKey.trim()}
-            style={{ background: warmColors.button, color: warmColors.buttonText, border: "none", borderRadius: 8, padding: "0 18px", fontWeight: 600, cursor: loading ? "not-allowed" : "pointer", transition: "background 0.2s" }}
-          >
-            {loading ? "..." : "Send"}
-          </button>
-        </div>
       </div>
-      <footer style={{ marginTop: 32, color: warmColors.buttonText, fontSize: 14 }}>
-        Powered by Next.js & FastAPI
-      </footer>
+      <div className={styles.chatHistory} ref={chatHistoryRef}>
+        {messages.length === 0 && <div style={{ color: '#1976d2', opacity: 0.7 }}>Start the conversation!</div>}
+        {messages.map((msg, idx) => (
+          <div key={idx} className={styles.messageRow}>
+            <div className={msg.role === "user" ? styles.userMsg : styles.assistantMsg}>{msg.content}</div>
+          </div>
+        ))}
+        {loading && (
+          <div className={styles.messageRow}>
+            <div className={styles.assistantMsg}>...</div>
+          </div>
+        )}
+      </div>
+      {error && <div className={styles.errorMsg}>{error}</div>}
+      <div className={styles.inputRow}>
+        <input
+          className={styles.inputField}
+          type="text"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter" && !loading) handleSend(); }}
+          placeholder="Type your message..."
+          disabled={loading}
+        />
+        <button
+          className={styles.sendButton}
+          onClick={handleSend}
+          disabled={loading || !input.trim() || !selectedFile}
+        >
+          {loading ? "..." : "Send"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export default function Home() {
+  const [apiKey, setApiKey] = useState("");
+  const [modalOpen, setModalOpen] = useState(false);
+
+  useEffect(() => {
+    const storedKey = localStorage.getItem("openaiApiKey");
+    if (storedKey) setApiKey(storedKey);
+    const openModal = () => setModalOpen(true);
+    window.addEventListener("openSettingsModal", openModal);
+    return () => window.removeEventListener("openSettingsModal", openModal);
+  }, []);
+
+  useEffect(() => {
+    if (apiKey) localStorage.setItem("openaiApiKey", apiKey);
+    else localStorage.removeItem("openaiApiKey");
+  }, [apiKey]);
+
+  return (
+    <div className={styles.root}>
+      <SettingsModal open={modalOpen} onClose={() => setModalOpen(false)} apiKey={apiKey} setApiKey={setApiKey} />
+      <div className={styles.container}>
+        <PdfUploadBox />
+        <ChatBox apiKey={apiKey} />
+      </div>
     </div>
   );
 }
