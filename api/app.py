@@ -10,7 +10,7 @@ from aimakerspace.text_utils import CharacterTextSplitter, PDFLoader
 from aimakerspace.vectordatabase import VectorDatabase
 from fastapi import Body, FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 
 # Import OpenAI client for interacting with OpenAI's API
 from openai import OpenAI
@@ -30,6 +30,9 @@ app.add_middleware(
     allow_methods=["*"],  # Allows all HTTP methods (GET, POST, etc.)
     allow_headers=["*"],  # Allows all headers in requests
 )
+
+UPLOAD_DIR = os.getenv("UPLOAD_DIR", "uploaded_files")
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 
 # Define the data model for chat requests using Pydantic
@@ -120,14 +123,16 @@ async def upload_pdf(file: UploadFile = File(...)):
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are supported.")
 
-    # Save uploaded file to a temporary location
+    # Save uploaded file to a temp location and to UPLOAD_DIR
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
         shutil.copyfileobj(file.file, tmp)
         tmp_path = tmp.name
+    dest_path = os.path.join(UPLOAD_DIR, file.filename)
+    shutil.copy(tmp_path, dest_path)
 
     try:
         # Load and extract text from PDF
-        loader = PDFLoader(tmp_path)
+        loader = PDFLoader(dest_path)
         documents = loader.load_documents()  # List of extracted text (usually one item)
         if not documents or not documents[0].strip():
             raise HTTPException(
@@ -147,12 +152,6 @@ async def upload_pdf(file: UploadFile = File(...)):
         return {"status": "success", "chunks_uploaded": len(chunks)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error processing PDF: {str(e)}")
-    finally:
-        # Clean up temp file
-        try:
-            os.remove(tmp_path)
-        except Exception:
-            pass
 
 
 @app.post("/api/upload_gpx")
@@ -160,14 +159,16 @@ async def upload_gpx(file: UploadFile = File(...)):
     if not file.filename.lower().endswith(".gpx"):
         raise HTTPException(status_code=400, detail="Only GPX files are supported.")
 
-    # Save uploaded file to a temporary location
+    # Save uploaded file to a temp location and to UPLOAD_DIR
     with tempfile.NamedTemporaryFile(delete=False, suffix=".gpx") as tmp:
         shutil.copyfileobj(file.file, tmp)
         tmp_path = tmp.name
+    dest_path = os.path.join(UPLOAD_DIR, file.filename)
+    shutil.copy(tmp_path, dest_path)
 
     try:
         # Parse GPX file
-        with open(tmp_path) as gpx_file:
+        with open(dest_path) as gpx_file:
             gpx = gpxpy.parse(gpx_file)
 
         # Extract summary and details
@@ -208,11 +209,6 @@ async def upload_gpx(file: UploadFile = File(...)):
         return {"status": "success", "chunks_uploaded": len(chunks)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error processing GPX: {str(e)}")
-    finally:
-        try:
-            os.remove(tmp_path)
-        except Exception:
-            pass
 
 
 @app.post("/api/search")
@@ -241,6 +237,14 @@ async def list_files():
         if "file_name" in payload:
             file_names.add(payload["file_name"])
     return {"files": sorted(file_names)}
+
+
+@app.get("/api/file/{file_name}")
+async def get_uploaded_file(file_name: str):
+    file_path = os.path.join(UPLOAD_DIR, file_name)
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(file_path, filename=file_name)
 
 
 # Entry point for running the application directly
