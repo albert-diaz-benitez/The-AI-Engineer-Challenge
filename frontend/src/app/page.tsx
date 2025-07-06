@@ -1,6 +1,9 @@
 "use client";
 import React, { useState, useRef, useEffect } from "react";
 import styles from "./page.module.css";
+import dynamic from "next/dynamic";
+
+const GpxMapPreview = dynamic(() => import("./GpxMapPreview"), { ssr: false });
 
 function SettingsModal({ open, onClose, apiKey, setApiKey }: { open: boolean; onClose: () => void; apiKey: string; setApiKey: (k: string) => void }) {
   const [input, setInput] = useState(apiKey);
@@ -37,17 +40,12 @@ function PdfUploadBox() {
   const [uploading, setUploading] = useState(false);
   const [success, setSuccess] = useState("");
   const [error, setError] = useState("");
-  const [uploadType, setUploadType] = useState<'pdf' | 'gpx'>('pdf');
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setFile(e.target.files?.[0] || null);
+    const selected = e.target.files?.[0] || null;
+    setFile(selected);
     setSuccess("");
     setError("");
-    if (e.target.files?.[0]?.name.toLowerCase().endsWith('.gpx')) {
-      setUploadType('gpx');
-    } else {
-      setUploadType('pdf');
-    }
   };
 
   const handleUpload = async () => {
@@ -100,7 +98,7 @@ function PdfUploadBox() {
         onClick={handleUpload}
         disabled={uploading || !file}
       >
-        {uploading ? "Uploading..." : `Upload ${uploadType === 'gpx' ? 'GPX' : 'PDF'}`}
+        {uploading ? "Uploading..." : "Upload"}
       </button>
       {success && <div className={styles.successMsg}>{success}</div>}
       {error && <div className={styles.errorMsg}>{error}</div>}
@@ -117,21 +115,30 @@ function fileIcon(fileName: string) {
   return '📁';
 }
 
-function ChatBox({ apiKey }: { apiKey: string }) {
+function formatTime(date: Date) {
+  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function ChatBox({ apiKey, selectedFile, setSelectedFile }: { apiKey: string, selectedFile: string, setSelectedFile: (f: string) => void }) {
   const [input, setInput] = useState("");
-  const [messages, setMessages] = useState<{ role: "user" | "assistant"; content: string }[]>([]);
+  const [messages, setMessages] = useState<{ role: "user" | "assistant"; content: string; timestamp: string }[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [files, setFiles] = useState<string[]>([]);
-  const [selectedFile, setSelectedFile] = useState<string>("");
-  const chatHistoryRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    // Fetch file list from backend
     fetch("/api/files")
       .then(res => res.json())
       .then(data => setFiles(data.files || []));
   }, []);
+
+  useEffect(() => {
+    // Auto-scroll to latest message
+    chatHistoryRef.current?.scrollTo({
+      top: chatHistoryRef.current.scrollHeight,
+      behavior: "smooth",
+    });
+  }, [messages, loading]);
 
   const handleSend = async () => {
     if (!input.trim()) return;
@@ -145,7 +152,8 @@ function ChatBox({ apiKey }: { apiKey: string }) {
     }
     setError("");
     setLoading(true);
-    setMessages((msgs) => [...msgs, { role: "user", content: input }]);
+    const now = formatTime(new Date());
+    setMessages((msgs) => [...msgs, { role: "user", content: input, timestamp: now }]);
     const userMessage = input;
     setInput("");
     try {
@@ -164,6 +172,8 @@ function ChatBox({ apiKey }: { apiKey: string }) {
       let assistantMessage = "";
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
+      let aiMessageAdded = false;
+      const aiTimestamp = formatTime(new Date());
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
@@ -172,12 +182,16 @@ function ChatBox({ apiKey }: { apiKey: string }) {
           if (msgs[msgs.length - 1]?.role === "assistant") {
             return [
               ...msgs.slice(0, msgs.length - 1),
-              { role: "assistant", content: assistantMessage },
+              { role: "assistant", content: assistantMessage, timestamp: aiTimestamp },
             ];
           } else {
-            return [...msgs, { role: "assistant", content: assistantMessage }];
+            aiMessageAdded = true;
+            return [...msgs, { role: "assistant", content: assistantMessage, timestamp: aiTimestamp }];
           }
         });
+      }
+      if (!aiMessageAdded) {
+        setMessages((msgs) => [...msgs, { role: "assistant", content: assistantMessage, timestamp: aiTimestamp }]);
       }
     } catch (e) {
       if (e instanceof Error) {
@@ -187,16 +201,22 @@ function ChatBox({ apiKey }: { apiKey: string }) {
       }
     } finally {
       setLoading(false);
-      setTimeout(() => {
-        chatHistoryRef.current?.scrollTo({ top: chatHistoryRef.current.scrollHeight, behavior: "smooth" });
-      }, 100);
     }
   };
+
+  const handleInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey && !loading) {
+      e.preventDefault();
+      handleSend();
+    }
+  };
+
+  const chatHistoryRef = useRef<HTMLDivElement>(null);
 
   return (
     <div className={styles.chatBox}>
       <div style={{ display: "flex", width: "100%", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-        <div className={styles.chatTitle}>Chat with your Documents</div>
+        <div className={styles.chatTitle}>Chat with the Assistant</div>
         <button onClick={() => window.dispatchEvent(new CustomEvent("openSettingsModal"))} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#1976d2" }} aria-label="Settings">⚙️</button>
       </div>
       <div style={{ width: "100%", marginBottom: 12 }}>
@@ -220,33 +240,48 @@ function ChatBox({ apiKey }: { apiKey: string }) {
       <div className={styles.chatHistory} ref={chatHistoryRef}>
         {messages.length === 0 && <div style={{ color: '#1976d2', opacity: 0.7 }}>Start the conversation!</div>}
         {messages.map((msg, idx) => (
-          <div key={idx} className={styles.messageRow}>
-            <div className={msg.role === "user" ? styles.userMsg : styles.assistantMsg}>{msg.content}</div>
+          <div key={idx} className={styles.messageRow} style={{ alignItems: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 22 }}>{msg.role === 'user' ? '🧑' : '🤖'}</span>
+              <div className={msg.role === "user" ? styles.userMsg : styles.assistantMsg}>
+                {msg.content}
+                <div style={{ fontSize: 12, color: '#888', marginTop: 4, textAlign: 'right' }}>{msg.timestamp}</div>
+              </div>
+            </div>
           </div>
         ))}
         {loading && (
-          <div className={styles.messageRow}>
-            <div className={styles.assistantMsg}>...</div>
+          <div className={styles.messageRow} style={{ alignItems: 'flex-start' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 22 }}>🤖</span>
+              <div className={styles.assistantMsg}>
+                <span className={styles.loadingDots}>
+                  <span>.</span><span>.</span><span>.</span>
+                </span>
+                <div style={{ fontSize: 12, color: '#888', marginTop: 4, textAlign: 'right' }}>{formatTime(new Date())}</div>
+              </div>
+            </div>
           </div>
         )}
       </div>
       {error && <div className={styles.errorMsg}>{error}</div>}
       <div className={styles.inputRow}>
-        <input
+        <textarea
           className={styles.inputField}
-          type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter" && !loading) handleSend(); }}
+          onKeyDown={handleInputKeyDown}
           placeholder="Type your message..."
           disabled={loading}
+          rows={2}
+          style={{ resize: 'vertical', minHeight: 40, maxHeight: 120 }}
         />
         <button
           className={styles.sendButton}
           onClick={handleSend}
           disabled={loading || !input.trim() || !selectedFile}
         >
-          {loading ? "..." : "Send"}
+          {loading ? <span className={styles.loadingDots}><span>.</span><span>.</span><span>.</span></span> : "Send"}
         </button>
       </div>
     </div>
@@ -256,6 +291,7 @@ function ChatBox({ apiKey }: { apiKey: string }) {
 export default function Home() {
   const [apiKey, setApiKey] = useState("");
   const [modalOpen, setModalOpen] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<string>("");
 
   useEffect(() => {
     const storedKey = localStorage.getItem("openaiApiKey");
@@ -274,8 +310,17 @@ export default function Home() {
     <div className={styles.root}>
       <SettingsModal open={modalOpen} onClose={() => setModalOpen(false)} apiKey={apiKey} setApiKey={setApiKey} />
       <div className={styles.container}>
-        <PdfUploadBox />
-        <ChatBox apiKey={apiKey} />
+        <div className={styles.leftBox}>
+          <PdfUploadBox />
+          {selectedFile && selectedFile.toLowerCase().endsWith('.gpx') ? (
+            <GpxMapPreview fileName={selectedFile} />
+          ) : (
+            <div className={styles.gpxPreview} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#1976d2', fontWeight: 500, fontSize: 18, opacity: 0.7 }}>
+              Map preview will appear here when a GPX file is selected
+            </div>
+          )}
+        </div>
+        <ChatBox apiKey={apiKey} selectedFile={selectedFile} setSelectedFile={setSelectedFile} />
       </div>
     </div>
   );

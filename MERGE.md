@@ -1,34 +1,38 @@
-# How to Merge the Latest Feature Branch into `main`
+# How to Merge 'feature/ux-ui-improvements' into main
 
-## 🚀 What's New in This PR?
-- **Document-aware chat:** Users must select a file (PDF) to use as context for chat. Only content from the selected file is used for answers.
-- **File selector in chat UI:** Users can only chat after selecting a file, making the experience precise and document-specific.
-- **Qdrant file management:** File names are stored in Qdrant and can be listed via `/api/files`.
-- **Frontend redesign:** Clean, modern, side-by-side layout with a settings modal for API key, improved chat and upload experience, and a beautiful background.
+## Summary of Changes
+- Transparent header that blends with the scenic background
+- Unified background image and gradient for header and main content
+- Wider upload box to prevent text wrapping
+- Upload button always displays 'Upload' (except when uploading)
+- Chat box title changed to "Chat with the Assistant"
 
-## How to Merge
+## Merge via GitHub Pull Request
+1. Push your branch if you haven't already:
+   ```bash
+   git push origin feature/ux-ui-improvements
+   ```
+2. Go to your repository on GitHub.
+3. Click "Compare & pull request" for the `feature/ux-ui-improvements` branch.
+4. Review the changes, add a description, and create the pull request.
+5. After review, click "Merge pull request" to merge into `main`.
 
-### 1. Push your branch to the remote repository (if not already pushed):
-```bash
-git push origin <your-feature-branch>
-```
-
-### 2. Open a Pull Request (PR) on GitHub:
-- Go to your repository on GitHub.
-- Click "Compare & pull request" for your branch.
-- Review the changes, add a description, and submit the PR.
-- After review, click "Merge pull request" to merge into `main`.
-
-### 3. Or, use GitHub CLI:
-```bash
-gh pr create --base main --head <your-feature-branch> --title "Document-aware chat, file selector, and frontend redesign" --body "This PR adds document-aware chat, a required file selector, Qdrant file management, and a modernized frontend."
-# To merge after review:
-gh pr merge --merge
-```
+## Merge via GitHub CLI
+1. Push your branch if you haven't already:
+   ```bash
+   git push origin feature/ux-ui-improvements
+   ```
+2. Create a pull request from the command line:
+   ```bash
+   gh pr create --base main --head feature/ux-ui-improvements --fill
+   ```
+3. Merge the pull request after review:
+   ```bash
+   gh pr merge --merge
+   ```
 
 ---
-
-**After merging, pull the latest changes to your local main:**
+After merging, pull the latest changes to your local `main` branch:
 ```bash
 git checkout main
 git pull origin main
