@@ -16,8 +16,8 @@ export default function GpxMapPreview({ fileName }: { fileName: string }) {
         const geojson = togeojson.gpx(gpxDoc);
         // Extract all coordinates from all LineString features
         const coords: Array<[number, number]> = [];
-        geojson.features.forEach((f: any) => {
-          if (f.geometry.type === "LineString") {
+        geojson.features.forEach((f) => {
+          if (f.geometry && f.geometry.type === "LineString") {
             (f.geometry.coordinates as [number, number][]).forEach(([lon, lat]: [number, number]) => coords.push([lat, lon]));
           }
         });

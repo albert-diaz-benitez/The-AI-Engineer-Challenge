@@ -1,9 +1,6 @@
 "use client";
 import React, { useState, useRef, useEffect } from "react";
 import styles from "./page.module.css";
-import * as togeojson from "@tmcw/togeojson";
-import type { MapContainerProps } from "react-leaflet";
-import { MapContainer, TileLayer, Polyline } from "react-leaflet";
 import dynamic from "next/dynamic";
 
 const GpxMapPreview = dynamic(() => import("./GpxMapPreview"), { ssr: false });
@@ -43,19 +40,12 @@ function PdfUploadBox() {
   const [uploading, setUploading] = useState(false);
   const [success, setSuccess] = useState("");
   const [error, setError] = useState("");
-  const [uploadType, setUploadType] = useState<'pdf' | 'gpx'>('pdf');
-  const [lastGpxFile, setLastGpxFile] = useState<string>("");
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selected = e.target.files?.[0] || null;
     setFile(selected);
     setSuccess("");
     setError("");
-    if (selected?.name.toLowerCase().endsWith('.gpx')) {
-      setUploadType('gpx');
-    } else {
-      setUploadType('pdf');
-    }
   };
 
   const handleUpload = async () => {
@@ -83,9 +73,6 @@ function PdfUploadBox() {
       const data = await response.json();
       setSuccess(`Upload successful! Chunks uploaded: ${data.chunks_uploaded}`);
       setFile(null);
-      if (file.name.toLowerCase().endsWith('.gpx')) {
-        setLastGpxFile(file.name);
-      }
     } catch (e) {
       if (e instanceof Error) {
         setError(e.message || "Upload failed");
