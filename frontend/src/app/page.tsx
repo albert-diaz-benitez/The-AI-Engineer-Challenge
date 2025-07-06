@@ -35,7 +35,7 @@ function SettingsModal({ open, onClose, apiKey, setApiKey }: { open: boolean; on
   );
 }
 
-function PdfUploadBox() {
+function PdfUploadBox({ files, refreshFiles }: { files: string[]; refreshFiles: () => void }) {
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [success, setSuccess] = useState("");
@@ -73,6 +73,7 @@ function PdfUploadBox() {
       const data = await response.json();
       setSuccess(`Upload successful! Chunks uploaded: ${data.chunks_uploaded}`);
       setFile(null);
+      refreshFiles();
     } catch (e) {
       if (e instanceof Error) {
         setError(e.message || "Upload failed");
@@ -119,18 +120,11 @@ function formatTime(date: Date) {
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-function ChatBox({ apiKey, selectedFiles, setSelectedFiles }: { apiKey: string, selectedFiles: string[], setSelectedFiles: (f: string[]) => void }) {
+function ChatBox({ apiKey, selectedFiles, setSelectedFiles, files }: { apiKey: string, selectedFiles: string[], setSelectedFiles: (f: string[]) => void, files: string[] }) {
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<{ role: "user" | "assistant"; content: string; timestamp: string }[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [files, setFiles] = useState<string[]>([]);
-
-  useEffect(() => {
-    fetch("/api/files")
-      .then(res => res.json())
-      .then(data => setFiles(data.files || []));
-  }, []);
 
   useEffect(() => {
     chatHistoryRef.current?.scrollTo({
@@ -145,7 +139,7 @@ function ChatBox({ apiKey, selectedFiles, setSelectedFiles }: { apiKey: string, 
       setError("Please set your OpenAI API key in settings before chatting.");
       return;
     }
-    if (selectedFiles.length === 0) {
+    if (selectedFiles.length === 0 || !selectedFiles[0]) {
       setError("Please select at least one file to use for context.");
       return;
     }
@@ -166,7 +160,7 @@ function ChatBox({ apiKey, selectedFiles, setSelectedFiles }: { apiKey: string, 
           user_message: userMessage,
           model: "gpt-4.1-mini",
           api_key: apiKey,
-          file_names: selectedFiles,
+          file_names: selectedFiles.filter(Boolean),
         }),
       });
       if (!response.body) throw new Error("No response body");
@@ -221,28 +215,46 @@ function ChatBox({ apiKey, selectedFiles, setSelectedFiles }: { apiKey: string, 
         <button onClick={() => window.dispatchEvent(new CustomEvent("openSettingsModal"))} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#1976d2" }} aria-label="Settings">⚙️</button>
       </div>
       <div style={{ width: "100%", marginBottom: 12 }}>
-        <label style={{ fontWeight: 600, color: "#1976d2", fontSize: "1.1rem" }}>
-          Select one or two files for context:
+        <div style={{ color: '#1976d2', fontSize: 14, marginBottom: 8, opacity: 0.8 }}>
+          {selectedFiles[0] && selectedFiles[1] ? `Comparison mode: ${selectedFiles[0]} vs ${selectedFiles[1]}` : selectedFiles[0] ? `Single file: ${selectedFiles[0]}` : 'No file selected'}
+        </div>
+        <label style={{ fontWeight: 600, color: "#1976d2", fontSize: "1.1rem", display: 'block', marginBottom: 6 }}>
+          Select first file for context:
           <select
-            multiple
-            value={selectedFiles}
+            value={selectedFiles[0] || ""}
             onChange={e => {
-              const options = Array.from(e.target.selectedOptions).map(opt => opt.value);
-              setSelectedFiles(options.slice(0, 2)); // limit to 2
+              const newFiles = [e.target.value, selectedFiles[1] === e.target.value ? "" : selectedFiles[1]];
+              setSelectedFiles(newFiles.filter(Boolean));
             }}
             style={{ marginLeft: 12, padding: "8px 16px", borderRadius: 8, border: "1.5px solid #90caf9", fontSize: "1.1rem", background: "#fff", minWidth: 220 }}
             required
           >
+            <option value="" disabled>Select a file...</option>
             {files.map(f => (
-              <option key={f} value={f} disabled={selectedFiles.length === 2 && !selectedFiles.includes(f)}>
+              <option key={f} value={f} disabled={selectedFiles[1] === f}>
                 {fileIcon(f)} {f}
               </option>
             ))}
           </select>
         </label>
-        <div style={{ color: '#1976d2', fontSize: 14, marginTop: 4, opacity: 0.8 }}>
-          {selectedFiles.length === 2 ? `Comparison mode: ${selectedFiles[0]} vs ${selectedFiles[1]}` : selectedFiles.length === 1 ? `Single file: ${selectedFiles[0]}` : 'No file selected'}
-        </div>
+        <label style={{ fontWeight: 600, color: "#1976d2", fontSize: "1.1rem", display: 'block', marginBottom: 0 }}>
+          Select second file for comparison (optional):
+          <select
+            value={selectedFiles[1] || ""}
+            onChange={e => {
+              const newFiles = [selectedFiles[0], e.target.value === selectedFiles[0] ? "" : e.target.value];
+              setSelectedFiles(newFiles.filter(Boolean));
+            }}
+            style={{ marginLeft: 12, padding: "8px 16px", borderRadius: 8, border: "1.5px solid #90caf9", fontSize: "1.1rem", background: "#fff", minWidth: 220 }}
+          >
+            <option value="" disabled>Select a file...</option>
+            {files.map(f => (
+              <option key={f} value={f} disabled={selectedFiles[0] === f}>
+                {fileIcon(f)} {f}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
       <div className={styles.chatHistory} ref={chatHistoryRef}>
         {messages.length === 0 && <div style={{ color: '#1976d2', opacity: 0.7 }}>Start the conversation!</div>}
@@ -286,7 +298,7 @@ function ChatBox({ apiKey, selectedFiles, setSelectedFiles }: { apiKey: string, 
         <button
           className={styles.sendButton}
           onClick={handleSend}
-          disabled={loading || !input.trim() || selectedFiles.length === 0}
+          disabled={loading || !input.trim() || !selectedFiles[0]}
         >
           {loading ? <span className={styles.loadingDots}><span>.</span><span>.</span><span>.</span></span> : "Send"}
         </button>
@@ -299,6 +311,14 @@ export default function Home() {
   const [apiKey, setApiKey] = useState("");
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
+  const [previewIndex, setPreviewIndex] = useState(0);
+  const [files, setFiles] = useState<string[]>([]);
+
+  const refreshFiles = () => {
+    fetch("/api/files")
+      .then(res => res.json())
+      .then(data => setFiles(data.files || []));
+  };
 
   useEffect(() => {
     const storedKey = localStorage.getItem("openaiApiKey");
@@ -313,21 +333,69 @@ export default function Home() {
     else localStorage.removeItem("openaiApiKey");
   }, [apiKey]);
 
+  useEffect(() => {
+    setPreviewIndex(0);
+  }, [selectedFiles]);
+
+  useEffect(() => {
+    refreshFiles();
+  }, []);
+
+  const selectedGpxFiles = selectedFiles.filter(f => f.toLowerCase().endsWith('.gpx'));
+
   return (
     <div className={styles.root}>
       <SettingsModal open={modalOpen} onClose={() => setModalOpen(false)} apiKey={apiKey} setApiKey={setApiKey} />
       <div className={styles.container}>
         <div className={styles.leftBox}>
-          <PdfUploadBox />
-          {selectedFiles.length === 1 && selectedFiles[0].toLowerCase().endsWith('.gpx') ? (
-            <GpxMapPreview fileName={selectedFiles[0]} />
+          <PdfUploadBox files={files} refreshFiles={refreshFiles} />
+          {selectedGpxFiles.length === 2 ? (
+            <>
+              <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
+                <button
+                  onClick={() => setPreviewIndex(0)}
+                  style={{
+                    background: previewIndex === 0 ? '#1976d2' : '#e3f0fc',
+                    color: previewIndex === 0 ? '#fff' : '#1976d2',
+                    border: '1.5px solid #90caf9',
+                    borderRadius: 8,
+                    padding: '8px 18px',
+                    fontWeight: 600,
+                    fontSize: 16,
+                    cursor: 'pointer',
+                    transition: 'background 0.2s',
+                  }}
+                >
+                  {selectedGpxFiles[0]}
+                </button>
+                <button
+                  onClick={() => setPreviewIndex(1)}
+                  style={{
+                    background: previewIndex === 1 ? '#1976d2' : '#e3f0fc',
+                    color: previewIndex === 1 ? '#fff' : '#1976d2',
+                    border: '1.5px solid #90caf9',
+                    borderRadius: 8,
+                    padding: '8px 18px',
+                    fontWeight: 600,
+                    fontSize: 16,
+                    cursor: 'pointer',
+                    transition: 'background 0.2s',
+                  }}
+                >
+                  {selectedGpxFiles[1]}
+                </button>
+              </div>
+              <GpxMapPreview fileName={selectedGpxFiles[previewIndex]} />
+            </>
+          ) : selectedGpxFiles.length === 1 ? (
+            <GpxMapPreview fileName={selectedGpxFiles[0]} />
           ) : (
             <div className={styles.gpxPreview} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#1976d2', fontWeight: 500, fontSize: 18, opacity: 0.7 }}>
               Map preview will appear here when a GPX file is selected
             </div>
           )}
         </div>
-        <ChatBox apiKey={apiKey} selectedFiles={selectedFiles} setSelectedFiles={setSelectedFiles} />
+        <ChatBox apiKey={apiKey} selectedFiles={selectedFiles} setSelectedFiles={setSelectedFiles} files={files} />
       </div>
     </div>
   );

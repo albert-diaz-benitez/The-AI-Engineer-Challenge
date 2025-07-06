@@ -166,3 +166,4 @@ cython_debug/
 /qdrant_data/
 /.vscode/
 /.idea/
+/uploaded_files/
