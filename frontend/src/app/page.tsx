@@ -5,6 +5,11 @@ import dynamic from "next/dynamic";
 
 const GpxMapPreview = dynamic(() => import("./GpxMapPreview"), { ssr: false });
 
+console.log('NEXT_PUBLIC_API_URL:', process.env.NEXT_PUBLIC_API_URL);
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL;
+const getApiUrl = (path: string) => `${API_BASE}${path}`;
+
 function SettingsModal({ open, onClose, apiKey, setApiKey }: { open: boolean; onClose: () => void; apiKey: string; setApiKey: (k: string) => void }) {
   const [input, setInput] = useState(apiKey);
   useEffect(() => { setInput(apiKey); }, [apiKey, open]);
@@ -60,8 +65,8 @@ function PdfUploadBox({ refreshFiles }: { refreshFiles: () => void }) {
       const formData = new FormData();
       formData.append("file", file);
       const endpoint = file.name.toLowerCase().endsWith('.gpx')
-        ? "/api/upload_gpx"
-        : "/api/upload_pdf";
+        ? getApiUrl('/api/upload_gpx')
+        : getApiUrl('/api/upload_pdf');
       const response = await fetch(endpoint, {
         method: "POST",
         body: formData,
@@ -165,7 +170,7 @@ function ChatBox({ apiKey, selectedFiles, setSelectedFiles, files }: { apiKey: s
     const userMessage = input;
     setInput("");
     try {
-      const response = await fetch("/api/chat", {
+      const response = await fetch(getApiUrl('/api/chat'), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -327,7 +332,7 @@ export default function Home() {
   const [files, setFiles] = useState<string[]>([]);
 
   const refreshFiles = () => {
-    fetch("/api/files")
+    fetch(getApiUrl("/api/files"))
       .then(res => res.json())
       .then(data => setFiles(data.files || []));
   };
