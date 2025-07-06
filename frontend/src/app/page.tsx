@@ -5,6 +5,11 @@ import dynamic from "next/dynamic";
 
 const GpxMapPreview = dynamic(() => import("./GpxMapPreview"), { ssr: false });
 
+console.log('NEXT_PUBLIC_API_URL:', process.env.NEXT_PUBLIC_API_URL);
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL;
+const getApiUrl = (path: string) => `${API_BASE}${path}`;
+
 function SettingsModal({ open, onClose, apiKey, setApiKey }: { open: boolean; onClose: () => void; apiKey: string; setApiKey: (k: string) => void }) {
   const [input, setInput] = useState(apiKey);
   useEffect(() => { setInput(apiKey); }, [apiKey, open]);
@@ -35,7 +40,7 @@ function SettingsModal({ open, onClose, apiKey, setApiKey }: { open: boolean; on
   );
 }
 
-function PdfUploadBox() {
+function PdfUploadBox({ refreshFiles }: { refreshFiles: () => void }) {
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [success, setSuccess] = useState("");
@@ -60,8 +65,8 @@ function PdfUploadBox() {
       const formData = new FormData();
       formData.append("file", file);
       const endpoint = file.name.toLowerCase().endsWith('.gpx')
-        ? "/api/upload_gpx"
-        : "/api/upload_pdf";
+        ? getApiUrl('/api/upload_gpx')
+        : getApiUrl('/api/upload_pdf');
       const response = await fetch(endpoint, {
         method: "POST",
         body: formData,
@@ -73,6 +78,7 @@ function PdfUploadBox() {
       const data = await response.json();
       setSuccess(`Upload successful! Chunks uploaded: ${data.chunks_uploaded}`);
       setFile(null);
+      refreshFiles();
     } catch (e) {
       if (e instanceof Error) {
         setError(e.message || "Upload failed");
@@ -119,21 +125,14 @@ function formatTime(date: Date) {
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-function ChatBox({ apiKey, selectedFile, setSelectedFile }: { apiKey: string, selectedFile: string, setSelectedFile: (f: string) => void }) {
+function ChatBox({ apiKey, selectedFiles, setSelectedFiles, files }: { apiKey: string, selectedFiles: string[], setSelectedFiles: (f: string[]) => void, files: string[] }) {
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<{ role: "user" | "assistant"; content: string; timestamp: string }[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [files, setFiles] = useState<string[]>([]);
+  const [sending, setSending] = useState(false);
 
   useEffect(() => {
-    fetch("/api/files")
-      .then(res => res.json())
-      .then(data => setFiles(data.files || []));
-  }, []);
-
-  useEffect(() => {
-    // Auto-scroll to latest message
     chatHistoryRef.current?.scrollTo({
       top: chatHistoryRef.current.scrollHeight,
       behavior: "smooth",
@@ -141,57 +140,66 @@ function ChatBox({ apiKey, selectedFile, setSelectedFile }: { apiKey: string, se
   }, [messages, loading]);
 
   const handleSend = async () => {
-    if (!input.trim()) return;
-    if (!apiKey) {
-      setError("Please set your OpenAI API key in settings before chatting.");
+    if (sending) {
+      console.log("handleSend blocked: already sending");
       return;
     }
-    if (!selectedFile) {
-      setError("Please select a file to use for context.");
-      return;
-    }
+    setSending(true);
+    console.log("handleSend called", { input, time: Date.now() });
+    if (!input.trim()) { setSending(false); return; }
+    if (!apiKey) { setError("Please set your OpenAI API key in settings before chatting."); setSending(false); return; }
+    if (selectedFiles.length === 0 || !selectedFiles[0]) { setError("Please select at least one file to use for context."); setSending(false); return; }
     setError("");
     setLoading(true);
     const now = formatTime(new Date());
-    setMessages((msgs) => [...msgs, { role: "user", content: input, timestamp: now }]);
+    setMessages((msgs) => {
+      const trimmed = [...msgs];
+      while (
+        trimmed.length > 0 &&
+        trimmed[trimmed.length - 1].role === "assistant" &&
+        trimmed[trimmed.length - 1].content === "..."
+      ) {
+        trimmed.pop();
+      }
+      return [
+        ...trimmed,
+        { role: "user", content: input, timestamp: now },
+        { role: "assistant", content: "...", timestamp: formatTime(new Date()) }
+      ];
+    });
     const userMessage = input;
     setInput("");
     try {
-      const response = await fetch("/api/chat", {
+      const response = await fetch(getApiUrl('/api/chat'), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          developer_message: "You are a helpful assistant.",
+          developer_message: selectedFiles.length === 2
+            ? "You are a helpful assistant. Compare the two selected GPX routes based on the user's question. Use the provided context for each route."
+            : "You are a helpful assistant.",
           user_message: userMessage,
           model: "gpt-4.1-mini",
           api_key: apiKey,
-          file_name: selectedFile,
+          file_names: selectedFiles.filter(Boolean),
         }),
       });
       if (!response.body) throw new Error("No response body");
       let assistantMessage = "";
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
-      let aiMessageAdded = false;
-      const aiTimestamp = formatTime(new Date());
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
         assistantMessage += decoder.decode(value);
         setMessages((msgs) => {
-          if (msgs[msgs.length - 1]?.role === "assistant") {
+          if (msgs.length > 0 && msgs[msgs.length - 1].role === "assistant") {
             return [
               ...msgs.slice(0, msgs.length - 1),
-              { role: "assistant", content: assistantMessage, timestamp: aiTimestamp },
+              { ...msgs[msgs.length - 1], content: assistantMessage, timestamp: formatTime(new Date()) }
             ];
-          } else {
-            aiMessageAdded = true;
-            return [...msgs, { role: "assistant", content: assistantMessage, timestamp: aiTimestamp }];
           }
+          return msgs;
         });
-      }
-      if (!aiMessageAdded) {
-        setMessages((msgs) => [...msgs, { role: "assistant", content: assistantMessage, timestamp: aiTimestamp }]);
       }
     } catch (e) {
       if (e instanceof Error) {
@@ -201,11 +209,13 @@ function ChatBox({ apiKey, selectedFile, setSelectedFile }: { apiKey: string, se
       }
     } finally {
       setLoading(false);
+      setSending(false);
     }
   };
 
   const handleInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey && !loading) {
+    console.log("Input keydown", { key: e.key, sending });
+    if (e.key === "Enter" && !e.shiftKey && !loading && !sending) {
       e.preventDefault();
       handleSend();
     }
@@ -220,17 +230,41 @@ function ChatBox({ apiKey, selectedFile, setSelectedFile }: { apiKey: string, se
         <button onClick={() => window.dispatchEvent(new CustomEvent("openSettingsModal"))} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#1976d2" }} aria-label="Settings">⚙️</button>
       </div>
       <div style={{ width: "100%", marginBottom: 12 }}>
-        <label style={{ fontWeight: 600, color: "#1976d2", fontSize: "1.1rem" }}>
-          Select file for context:
+        <div style={{ color: '#1976d2', fontSize: 14, marginBottom: 8, opacity: 0.8 }}>
+          {selectedFiles[0] && selectedFiles[1] ? `Comparison mode: ${selectedFiles[0]} vs ${selectedFiles[1]}` : selectedFiles[0] ? `Single file: ${selectedFiles[0]}` : 'No file selected'}
+        </div>
+        <label style={{ fontWeight: 600, color: "#1976d2", fontSize: "1.1rem", display: 'block', marginBottom: 6 }}>
+          Select first file for context:
           <select
-            value={selectedFile}
-            onChange={e => setSelectedFile(e.target.value)}
-            style={{ marginLeft: 12, padding: "8px 16px", borderRadius: 8, border: "1.5px solid #90caf9", fontSize: "1.1rem", background: "#fff" }}
+            value={selectedFiles[0] || ""}
+            onChange={e => {
+              const newFiles = [e.target.value, selectedFiles[1] === e.target.value ? "" : selectedFiles[1]];
+              setSelectedFiles(newFiles.filter(Boolean));
+            }}
+            style={{ marginLeft: 12, padding: "8px 16px", borderRadius: 8, border: "1.5px solid #90caf9", fontSize: "1.1rem", background: "#fff", minWidth: 220 }}
             required
           >
             <option value="" disabled>Select a file...</option>
             {files.map(f => (
-              <option key={f} value={f}>
+              <option key={f} value={f} disabled={selectedFiles[1] === f}>
+                {fileIcon(f)} {f}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label style={{ fontWeight: 600, color: "#1976d2", fontSize: "1.1rem", display: 'block', marginBottom: 0 }}>
+          Select second file for comparison (optional):
+          <select
+            value={selectedFiles[1] || ""}
+            onChange={e => {
+              const newFiles = [selectedFiles[0], e.target.value === selectedFiles[0] ? "" : e.target.value];
+              setSelectedFiles(newFiles.filter(Boolean));
+            }}
+            style={{ marginLeft: 12, padding: "8px 16px", borderRadius: 8, border: "1.5px solid #90caf9", fontSize: "1.1rem", background: "#fff", minWidth: 220 }}
+          >
+            <option value="" disabled>Select a file...</option>
+            {files.map(f => (
+              <option key={f} value={f} disabled={selectedFiles[0] === f}>
                 {fileIcon(f)} {f}
               </option>
             ))}
@@ -244,7 +278,9 @@ function ChatBox({ apiKey, selectedFile, setSelectedFile }: { apiKey: string, se
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{ fontSize: 22 }}>{msg.role === 'user' ? '🧑' : '🤖'}</span>
               <div className={msg.role === "user" ? styles.userMsg : styles.assistantMsg}>
-                {msg.content}
+                {msg.content === "..." ? (
+                  <span className={styles.loadingDots}><span>.</span><span>.</span><span>.</span></span>
+                ) : msg.content}
                 <div style={{ fontSize: 12, color: '#888', marginTop: 4, textAlign: 'right' }}>{msg.timestamp}</div>
               </div>
             </div>
@@ -278,8 +314,8 @@ function ChatBox({ apiKey, selectedFile, setSelectedFile }: { apiKey: string, se
         />
         <button
           className={styles.sendButton}
-          onClick={handleSend}
-          disabled={loading || !input.trim() || !selectedFile}
+          onClick={() => { console.log('Send button clicked', { sending }); if (!sending) handleSend(); }}
+          disabled={loading || !input.trim() || !selectedFiles[0]}
         >
           {loading ? <span className={styles.loadingDots}><span>.</span><span>.</span><span>.</span></span> : "Send"}
         </button>
@@ -291,7 +327,15 @@ function ChatBox({ apiKey, selectedFile, setSelectedFile }: { apiKey: string, se
 export default function Home() {
   const [apiKey, setApiKey] = useState("");
   const [modalOpen, setModalOpen] = useState(false);
-  const [selectedFile, setSelectedFile] = useState<string>("");
+  const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
+  const [previewIndex, setPreviewIndex] = useState(0);
+  const [files, setFiles] = useState<string[]>([]);
+
+  const refreshFiles = () => {
+    fetch(getApiUrl("/api/files"))
+      .then(res => res.json())
+      .then(data => setFiles(data.files || []));
+  };
 
   useEffect(() => {
     const storedKey = localStorage.getItem("openaiApiKey");
@@ -306,21 +350,69 @@ export default function Home() {
     else localStorage.removeItem("openaiApiKey");
   }, [apiKey]);
 
+  useEffect(() => {
+    setPreviewIndex(0);
+  }, [selectedFiles]);
+
+  useEffect(() => {
+    refreshFiles();
+  }, []);
+
+  const selectedGpxFiles = selectedFiles.filter(f => f.toLowerCase().endsWith('.gpx'));
+
   return (
     <div className={styles.root}>
       <SettingsModal open={modalOpen} onClose={() => setModalOpen(false)} apiKey={apiKey} setApiKey={setApiKey} />
       <div className={styles.container}>
         <div className={styles.leftBox}>
-          <PdfUploadBox />
-          {selectedFile && selectedFile.toLowerCase().endsWith('.gpx') ? (
-            <GpxMapPreview fileName={selectedFile} />
+          <PdfUploadBox refreshFiles={refreshFiles} />
+          {selectedGpxFiles.length === 2 ? (
+            <>
+              <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
+                <button
+                  onClick={() => setPreviewIndex(0)}
+                  style={{
+                    background: previewIndex === 0 ? '#1976d2' : '#e3f0fc',
+                    color: previewIndex === 0 ? '#fff' : '#1976d2',
+                    border: '1.5px solid #90caf9',
+                    borderRadius: 8,
+                    padding: '8px 18px',
+                    fontWeight: 600,
+                    fontSize: 16,
+                    cursor: 'pointer',
+                    transition: 'background 0.2s',
+                  }}
+                >
+                  {selectedGpxFiles[0]}
+                </button>
+                <button
+                  onClick={() => setPreviewIndex(1)}
+                  style={{
+                    background: previewIndex === 1 ? '#1976d2' : '#e3f0fc',
+                    color: previewIndex === 1 ? '#fff' : '#1976d2',
+                    border: '1.5px solid #90caf9',
+                    borderRadius: 8,
+                    padding: '8px 18px',
+                    fontWeight: 600,
+                    fontSize: 16,
+                    cursor: 'pointer',
+                    transition: 'background 0.2s',
+                  }}
+                >
+                  {selectedGpxFiles[1]}
+                </button>
+              </div>
+              <GpxMapPreview fileName={selectedGpxFiles[previewIndex]} />
+            </>
+          ) : selectedGpxFiles.length === 1 ? (
+            <GpxMapPreview fileName={selectedGpxFiles[0]} />
           ) : (
             <div className={styles.gpxPreview} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#1976d2', fontWeight: 500, fontSize: 18, opacity: 0.7 }}>
               Map preview will appear here when a GPX file is selected
             </div>
           )}
         </div>
-        <ChatBox apiKey={apiKey} selectedFile={selectedFile} setSelectedFile={setSelectedFile} />
+        <ChatBox apiKey={apiKey} selectedFiles={selectedFiles} setSelectedFiles={setSelectedFiles} files={files} />
       </div>
     </div>
   );

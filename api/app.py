@@ -2,7 +2,7 @@
 import os
 import shutil
 import tempfile
-from typing import Optional
+from typing import List, Optional
 
 # Import gpxpy for GPX file processing
 import gpxpy
@@ -42,7 +42,7 @@ class ChatRequest(BaseModel):
     user_message: str  # Message from the user
     model: Optional[str] = "gpt-4.1-mini"  # Optional model selection with default
     api_key: str  # OpenAI API key for authentication
-    file_name: str
+    file_names: List[str]  # Accept one or two files
 
 
 class SearchRequestModel(BaseModel):
@@ -54,48 +54,68 @@ class SearchRequestModel(BaseModel):
 @app.post("/api/chat")
 async def chat(request: ChatRequest):
     try:
-        # Initialize OpenAI client with the provided API key
         client = OpenAI(api_key=request.api_key)
-
-        # --- RAG: Retrieve relevant context from Qdrant ---
         vector_db = VectorDatabase()
-        # Search for top 5 relevant chunks
-        relevant_chunks = vector_db.search_by_text(
-            request.user_message,
-            k=5,
-            return_as_text=True,
-            file_name=request.file_name,
-        )
-        context = "\n".join(relevant_chunks)  # type: ignore[arg-type]
-        # Compose the context-augmented system/developer message
-        rag_message = (
-            "You are a helpful assistant."
-            " Use the following context from the user's document "
-            "to answer the question.\nContext:\n" + context
-        )
+        file_names = request.file_names
+        if not file_names or len(file_names) == 0:
+            raise HTTPException(
+                status_code=400, detail="At least one file must be provided."
+            )
+        if len(file_names) == 1:
+            # Single file mode
+            relevant_chunks = vector_db.search_by_text(
+                request.user_message,
+                k=5,
+                return_as_text=True,
+                file_name=file_names[0],
+            )
+            context = "\n".join(relevant_chunks)
+            rag_message = (
+                "You are a helpful assistant. Use the following context from the user's document to answer the question.\nContext:\n"
+                + context
+            )
+        elif len(file_names) == 2:
+            # Comparison mode
+            relevant_chunks_1 = vector_db.search_by_text(
+                request.user_message,
+                k=5,
+                return_as_text=True,
+                file_name=file_names[0],
+            )
+            relevant_chunks_2 = vector_db.search_by_text(
+                request.user_message,
+                k=5,
+                return_as_text=True,
+                file_name=file_names[1],
+            )
+            context_1 = "\n".join(relevant_chunks_1)
+            context_2 = "\n".join(relevant_chunks_2)
+            rag_message = (
+                f"You are a helpful assistant. Compare the following two GPX routes based on the user's question. Use the provided context for each route.\n"
+                f"\nRoute 1: {file_names[0]}\nContext:\n{context_1}\n"
+                f"\nRoute 2: {file_names[1]}\nContext:\n{context_2}\n"
+            )
+        else:
+            raise HTTPException(
+                status_code=400, detail="You can only compare up to two files."
+            )
 
-        # Create an async generator function for streaming responses
         async def generate():
-            # Create a streaming chat completion request
             stream = client.chat.completions.create(
                 model=request.model,
                 messages=[
                     {"role": "system", "content": rag_message},
                     {"role": "user", "content": request.user_message},
                 ],
-                stream=True,  # Enable streaming response
+                stream=True,
             )
-
-            # Yield each chunk of the response as it becomes available
             for chunk in stream:
                 if chunk.choices[0].delta.content is not None:
                     yield chunk.choices[0].delta.content
 
-        # Return a streaming response to the client
         return StreamingResponse(generate(), media_type="text/plain")
 
     except Exception as e:
-        # Handle any errors that occur during processing
         raise HTTPException(status_code=500, detail=str(e))
 
 

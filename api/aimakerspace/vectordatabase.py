@@ -27,7 +27,8 @@ class VectorDatabase:
         self.collection_name = collection_name
         # Qdrant connection
         qdrant_url = os.getenv("QDRANT_URL", "http://localhost:6333")
-        self.client = QdrantClient(url=qdrant_url)
+        api_key = os.getenv("QDRANT_API_KEY", None)
+        self.client = QdrantClient(url=qdrant_url, api_key=api_key)
         self._ensure_collection()
 
     def _ensure_collection(self):

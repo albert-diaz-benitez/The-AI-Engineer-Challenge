@@ -1,9 +1,9 @@
-# fly.toml app configuration file generated for ai-engineer-challenge on 2025-06-30T19:39:38+02:00
+# fly.toml app configuration file generated for ai-engineering-challenge on 2025-07-06T17:41:58+02:00
 #
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
 
-app = 'ai-engineer-challenge'
+app = 'ai-engineering-challenge'
 primary_region = 'cdg'
 
 [build]

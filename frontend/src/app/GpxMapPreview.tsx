@@ -7,6 +7,7 @@ import styles from "./page.module.css";
 export default function GpxMapPreview({ fileName }: { fileName: string }) {
   const [positions, setPositions] = useState<Array<[number, number]>>([]);
   useEffect(() => {
+    setPositions([]); // Reset positions immediately on file change
     if (!fileName.toLowerCase().endsWith('.gpx')) return;
     fetch(`/api/file/${encodeURIComponent(fileName)}`)
       .then(res => res.text())
@@ -29,6 +30,7 @@ export default function GpxMapPreview({ fileName }: { fileName: string }) {
   return (
     <div className={styles.gpxPreview}>
       <MapContainer
+        key={fileName}
         center={center}
         zoom={13}
         style={{ width: "100%", height: "100%" }}
