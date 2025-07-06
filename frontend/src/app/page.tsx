@@ -35,7 +35,7 @@ function SettingsModal({ open, onClose, apiKey, setApiKey }: { open: boolean; on
   );
 }
 
-function PdfUploadBox({ files, refreshFiles }: { files: string[]; refreshFiles: () => void }) {
+function PdfUploadBox({ refreshFiles }: { refreshFiles: () => void }) {
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [success, setSuccess] = useState("");
@@ -125,6 +125,7 @@ function ChatBox({ apiKey, selectedFiles, setSelectedFiles, files }: { apiKey: s
   const [messages, setMessages] = useState<{ role: "user" | "assistant"; content: string; timestamp: string }[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [sending, setSending] = useState(false);
 
   useEffect(() => {
     chatHistoryRef.current?.scrollTo({
@@ -134,19 +135,33 @@ function ChatBox({ apiKey, selectedFiles, setSelectedFiles, files }: { apiKey: s
   }, [messages, loading]);
 
   const handleSend = async () => {
-    if (!input.trim()) return;
-    if (!apiKey) {
-      setError("Please set your OpenAI API key in settings before chatting.");
+    if (sending) {
+      console.log("handleSend blocked: already sending");
       return;
     }
-    if (selectedFiles.length === 0 || !selectedFiles[0]) {
-      setError("Please select at least one file to use for context.");
-      return;
-    }
+    setSending(true);
+    console.log("handleSend called", { input, time: Date.now() });
+    if (!input.trim()) { setSending(false); return; }
+    if (!apiKey) { setError("Please set your OpenAI API key in settings before chatting."); setSending(false); return; }
+    if (selectedFiles.length === 0 || !selectedFiles[0]) { setError("Please select at least one file to use for context."); setSending(false); return; }
     setError("");
     setLoading(true);
     const now = formatTime(new Date());
-    setMessages((msgs) => [...msgs, { role: "user", content: input, timestamp: now }]);
+    setMessages((msgs) => {
+      const trimmed = [...msgs];
+      while (
+        trimmed.length > 0 &&
+        trimmed[trimmed.length - 1].role === "assistant" &&
+        trimmed[trimmed.length - 1].content === "..."
+      ) {
+        trimmed.pop();
+      }
+      return [
+        ...trimmed,
+        { role: "user", content: input, timestamp: now },
+        { role: "assistant", content: "...", timestamp: formatTime(new Date()) }
+      ];
+    });
     const userMessage = input;
     setInput("");
     try {
@@ -167,26 +182,19 @@ function ChatBox({ apiKey, selectedFiles, setSelectedFiles, files }: { apiKey: s
       let assistantMessage = "";
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
-      let aiMessageAdded = false;
-      const aiTimestamp = formatTime(new Date());
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
         assistantMessage += decoder.decode(value);
         setMessages((msgs) => {
-          if (msgs[msgs.length - 1]?.role === "assistant") {
+          if (msgs.length > 0 && msgs[msgs.length - 1].role === "assistant") {
             return [
               ...msgs.slice(0, msgs.length - 1),
-              { role: "assistant", content: assistantMessage, timestamp: aiTimestamp },
+              { ...msgs[msgs.length - 1], content: assistantMessage, timestamp: formatTime(new Date()) }
             ];
-          } else {
-            aiMessageAdded = true;
-            return [...msgs, { role: "assistant", content: assistantMessage, timestamp: aiTimestamp }];
           }
+          return msgs;
         });
-      }
-      if (!aiMessageAdded) {
-        setMessages((msgs) => [...msgs, { role: "assistant", content: assistantMessage, timestamp: aiTimestamp }]);
       }
     } catch (e) {
       if (e instanceof Error) {
@@ -196,11 +204,13 @@ function ChatBox({ apiKey, selectedFiles, setSelectedFiles, files }: { apiKey: s
       }
     } finally {
       setLoading(false);
+      setSending(false);
     }
   };
 
   const handleInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey && !loading) {
+    console.log("Input keydown", { key: e.key, sending });
+    if (e.key === "Enter" && !e.shiftKey && !loading && !sending) {
       e.preventDefault();
       handleSend();
     }
@@ -263,7 +273,9 @@ function ChatBox({ apiKey, selectedFiles, setSelectedFiles, files }: { apiKey: s
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{ fontSize: 22 }}>{msg.role === 'user' ? '🧑' : '🤖'}</span>
               <div className={msg.role === "user" ? styles.userMsg : styles.assistantMsg}>
-                {msg.content}
+                {msg.content === "..." ? (
+                  <span className={styles.loadingDots}><span>.</span><span>.</span><span>.</span></span>
+                ) : msg.content}
                 <div style={{ fontSize: 12, color: '#888', marginTop: 4, textAlign: 'right' }}>{msg.timestamp}</div>
               </div>
             </div>
@@ -297,7 +309,7 @@ function ChatBox({ apiKey, selectedFiles, setSelectedFiles, files }: { apiKey: s
         />
         <button
           className={styles.sendButton}
-          onClick={handleSend}
+          onClick={() => { console.log('Send button clicked', { sending }); if (!sending) handleSend(); }}
           disabled={loading || !input.trim() || !selectedFiles[0]}
         >
           {loading ? <span className={styles.loadingDots}><span>.</span><span>.</span><span>.</span></span> : "Send"}
@@ -348,7 +360,7 @@ export default function Home() {
       <SettingsModal open={modalOpen} onClose={() => setModalOpen(false)} apiKey={apiKey} setApiKey={setApiKey} />
       <div className={styles.container}>
         <div className={styles.leftBox}>
-          <PdfUploadBox files={files} refreshFiles={refreshFiles} />
+          <PdfUploadBox refreshFiles={refreshFiles} />
           {selectedGpxFiles.length === 2 ? (
             <>
               <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
