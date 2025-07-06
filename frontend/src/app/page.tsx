@@ -119,7 +119,7 @@ function formatTime(date: Date) {
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-function ChatBox({ apiKey, selectedFile, setSelectedFile }: { apiKey: string, selectedFile: string, setSelectedFile: (f: string) => void }) {
+function ChatBox({ apiKey, selectedFiles, setSelectedFiles }: { apiKey: string, selectedFiles: string[], setSelectedFiles: (f: string[]) => void }) {
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<{ role: "user" | "assistant"; content: string; timestamp: string }[]>([]);
   const [loading, setLoading] = useState(false);
@@ -133,7 +133,6 @@ function ChatBox({ apiKey, selectedFile, setSelectedFile }: { apiKey: string, se
   }, []);
 
   useEffect(() => {
-    // Auto-scroll to latest message
     chatHistoryRef.current?.scrollTo({
       top: chatHistoryRef.current.scrollHeight,
       behavior: "smooth",
@@ -146,8 +145,8 @@ function ChatBox({ apiKey, selectedFile, setSelectedFile }: { apiKey: string, se
       setError("Please set your OpenAI API key in settings before chatting.");
       return;
     }
-    if (!selectedFile) {
-      setError("Please select a file to use for context.");
+    if (selectedFiles.length === 0) {
+      setError("Please select at least one file to use for context.");
       return;
     }
     setError("");
@@ -161,11 +160,13 @@ function ChatBox({ apiKey, selectedFile, setSelectedFile }: { apiKey: string, se
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          developer_message: "You are a helpful assistant.",
+          developer_message: selectedFiles.length === 2
+            ? "You are a helpful assistant. Compare the two selected GPX routes based on the user's question. Use the provided context for each route."
+            : "You are a helpful assistant.",
           user_message: userMessage,
           model: "gpt-4.1-mini",
           api_key: apiKey,
-          file_name: selectedFile,
+          file_names: selectedFiles,
         }),
       });
       if (!response.body) throw new Error("No response body");
@@ -221,21 +222,27 @@ function ChatBox({ apiKey, selectedFile, setSelectedFile }: { apiKey: string, se
       </div>
       <div style={{ width: "100%", marginBottom: 12 }}>
         <label style={{ fontWeight: 600, color: "#1976d2", fontSize: "1.1rem" }}>
-          Select file for context:
+          Select one or two files for context:
           <select
-            value={selectedFile}
-            onChange={e => setSelectedFile(e.target.value)}
-            style={{ marginLeft: 12, padding: "8px 16px", borderRadius: 8, border: "1.5px solid #90caf9", fontSize: "1.1rem", background: "#fff" }}
+            multiple
+            value={selectedFiles}
+            onChange={e => {
+              const options = Array.from(e.target.selectedOptions).map(opt => opt.value);
+              setSelectedFiles(options.slice(0, 2)); // limit to 2
+            }}
+            style={{ marginLeft: 12, padding: "8px 16px", borderRadius: 8, border: "1.5px solid #90caf9", fontSize: "1.1rem", background: "#fff", minWidth: 220 }}
             required
           >
-            <option value="" disabled>Select a file...</option>
             {files.map(f => (
-              <option key={f} value={f}>
+              <option key={f} value={f} disabled={selectedFiles.length === 2 && !selectedFiles.includes(f)}>
                 {fileIcon(f)} {f}
               </option>
             ))}
           </select>
         </label>
+        <div style={{ color: '#1976d2', fontSize: 14, marginTop: 4, opacity: 0.8 }}>
+          {selectedFiles.length === 2 ? `Comparison mode: ${selectedFiles[0]} vs ${selectedFiles[1]}` : selectedFiles.length === 1 ? `Single file: ${selectedFiles[0]}` : 'No file selected'}
+        </div>
       </div>
       <div className={styles.chatHistory} ref={chatHistoryRef}>
         {messages.length === 0 && <div style={{ color: '#1976d2', opacity: 0.7 }}>Start the conversation!</div>}
@@ -279,7 +286,7 @@ function ChatBox({ apiKey, selectedFile, setSelectedFile }: { apiKey: string, se
         <button
           className={styles.sendButton}
           onClick={handleSend}
-          disabled={loading || !input.trim() || !selectedFile}
+          disabled={loading || !input.trim() || selectedFiles.length === 0}
         >
           {loading ? <span className={styles.loadingDots}><span>.</span><span>.</span><span>.</span></span> : "Send"}
         </button>
@@ -291,7 +298,7 @@ function ChatBox({ apiKey, selectedFile, setSelectedFile }: { apiKey: string, se
 export default function Home() {
   const [apiKey, setApiKey] = useState("");
   const [modalOpen, setModalOpen] = useState(false);
-  const [selectedFile, setSelectedFile] = useState<string>("");
+  const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
 
   useEffect(() => {
     const storedKey = localStorage.getItem("openaiApiKey");
@@ -312,15 +319,15 @@ export default function Home() {
       <div className={styles.container}>
         <div className={styles.leftBox}>
           <PdfUploadBox />
-          {selectedFile && selectedFile.toLowerCase().endsWith('.gpx') ? (
-            <GpxMapPreview fileName={selectedFile} />
+          {selectedFiles.length === 1 && selectedFiles[0].toLowerCase().endsWith('.gpx') ? (
+            <GpxMapPreview fileName={selectedFiles[0]} />
           ) : (
             <div className={styles.gpxPreview} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#1976d2', fontWeight: 500, fontSize: 18, opacity: 0.7 }}>
               Map preview will appear here when a GPX file is selected
             </div>
           )}
         </div>
-        <ChatBox apiKey={apiKey} selectedFile={selectedFile} setSelectedFile={setSelectedFile} />
+        <ChatBox apiKey={apiKey} selectedFiles={selectedFiles} setSelectedFiles={setSelectedFiles} />
       </div>
     </div>
   );
